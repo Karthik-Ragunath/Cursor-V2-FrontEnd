@@ -1,20 +1,85 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, TextField, Typography, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft';
-import SendIcon from '@mui/icons-material/Send';
-import CodeIcon from '@mui/icons-material/Code';
-import PreviewIcon from '@mui/icons-material/Visibility';
+import { 
+  Send as SendIcon, 
+  Code as CodeIcon, 
+  Preview as PreviewIcon, 
+  KeyboardDoubleArrowLeft as KeyboardDoubleArrowLeftIcon,
+  ErrorOutline,
+  Mic as MicIcon,
+  MicOff as MicOffIcon,
+  Stop as StopIcon,
+} from '@mui/icons-material';
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
-import { ErrorOutline } from '@mui/icons-material';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+
+// TypeScript declarations for Speech Recognition
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
+interface SpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+      isFinal: boolean;
+      length: number;
+    };
+    length: number;
+  };
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
 
 const Container = styled(Box)({
+  height: '100vh',
   display: 'flex',
   flexDirection: 'column',
-  height: '100%',
   backgroundColor: '#1e1e1e',
-  flex: 1,
+  color: '#fff',
+  '& .MuiInputBase-root': {
+    color: '#fff',
+  },
+  '& .MuiOutlinedInput-notchedOutline': {
+    borderColor: '#3d3d3d',
+  },
+  '& .MuiInputLabel-root': {
+    color: '#9d9d9d',
+  },
+  '& .MuiSelect-icon': {
+    color: '#9d9d9d',
+  },
+  '& .MuiMenuItem-root': {
+    color: '#fff',
+    backgroundColor: '#2d2d2d',
+    '&:hover': {
+      backgroundColor: '#3d3d3d',
+    },
+  },
+  '@keyframes pulse': {
+    '0%': {
+      transform: 'scale(1)',
+      opacity: 1,
+    },
+    '50%': {
+      transform: 'scale(1.1)',
+      opacity: 0.7,
+    },
+    '100%': {
+      transform: 'scale(1)',
+      opacity: 1,
+    },
+  },
 });
 
 const EditorsContainer = styled(Box)({
@@ -453,6 +518,29 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   // Ensure firstDropdownValue is always a string
   const language = firstDropdownValue || 'html';
 
+  // Voice input integration
+  const handleVoiceTranscript = (transcript: string) => {
+    const newPrompt = prompt ? `${prompt} ${transcript}` : transcript;
+    onPromptChange(newPrompt.trim());
+  };
+
+  const {
+    isListening,
+    isSupported: voiceSupported,
+    error: voiceError,
+    startListening,
+    stopListening
+  } = useSpeechRecognition({
+    onTranscript: handleVoiceTranscript
+  });
+
+  // Update error state if voice error occurs
+  useEffect(() => {
+    if (voiceError) {
+      setError(voiceError);
+    }
+  }, [voiceError]);
+
   useEffect(() => {
     if (secondRadioValue !== 'none') {
       notifyComparisonCount(parseInt(secondRadioValue));
@@ -791,6 +879,24 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   error={!!error}
                   fullWidth
                 />
+                {voiceSupported && (
+                  <Tooltip title={isListening ? "Stop voice input" : "Start voice input"} placement="top">
+                    <IconButton
+                      onClick={isListening ? stopListening : startListening}
+                      disabled={isSubmitting}
+                      sx={{
+                        color: isListening ? '#ff6b6b' : '#9d9d9d',
+                        alignSelf: 'flex-start',
+                        mt: 1,
+                        '&:hover': { color: isListening ? '#ff5252' : '#fff' },
+                        '&.Mui-disabled': { color: '#4d4d4d' },
+                        animation: isListening ? 'pulse 1.5s infinite' : 'none',
+                      }}
+                    >
+                      {isListening ? <StopIcon /> : <MicIcon />}
+                    </IconButton>
+                  </Tooltip>
+                )}
                 <IconButton
                   onClick={handlePromptSubmit}
                   disabled={isSubmitting}
