@@ -29,7 +29,7 @@ export const executeCode = async (request: CodeExecuteRequest): Promise<CodeExec
       throw new Error('Backend server is not running. Please start the server and try again.');
     }
 
-    const response = await fetch(`${API_BASE_URL}/execute`, {
+    const response = await fetch(`${API_BASE_URL}/validate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
