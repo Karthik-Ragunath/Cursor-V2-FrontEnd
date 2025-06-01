@@ -320,21 +320,34 @@ const getPreviewContent = (code: string, language: string): string => {
   
   // Clean the code to ensure only code is displayed
   const { code: extractedCode } = extractCodeAndExplanation(code, language);
-  
+  console.log("Extracted code:", extractedCode);
   switch (language.toLowerCase()) {
     case 'html':
-      return URL.createObjectURL(new Blob([`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body>
-            ${extractedCode}
-          </body>
-        </html>
-      `], { type: 'text/html' }));
+      // Check if the extracted code is already a complete HTML document
+      const isCompleteHTML = extractedCode.trim().toLowerCase().includes('<!doctype') || 
+                            extractedCode.trim().toLowerCase().includes('<html');
+      
+      if (isCompleteHTML) {
+        // Use the code as-is since it's already a complete HTML document
+        console.log("Extracted code is complete HTML:", "YAYYYYYYY !!!");
+        const blobUrl = URL.createObjectURL(new Blob([extractedCode], { type: 'text/html' }));
+        console.log("Generated blob URL:", blobUrl);
+        return blobUrl;
+      } else {
+        // Wrap partial HTML content in a document structure
+        return URL.createObjectURL(new Blob([`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body>
+              ${extractedCode}
+            </body>
+          </html>
+        `], { type: 'text/html' }));
+      }
       
     case 'css':
       return URL.createObjectURL(new Blob([`
@@ -626,13 +639,29 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
 
   // Update preview URLs and explanations when codes change
   useEffect(() => {
+    console.log("=== useEffect triggered ===");
+    console.log("codes:", codes.map((code, i) => `[${i}]: ${code ? 'has code' : 'empty'}`));
+    console.log("viewModes:", viewModes);
+    console.log("firstDropdownValue:", firstDropdownValue);
+    
     const newPreviewUrls = codes.map((code, index) => {
+      console.log(`Processing code ${index}, viewMode: ${viewModes[index - 1]}, hasCode: ${!!code}`);
       if (viewModes[index - 1] === 'preview' && code) {
         const { code: extractedCode } = extractCodeAndExplanation(code, firstDropdownValue);
-        return getPreviewContent(extractedCode, firstDropdownValue);
+        if (extractedCode.trim()) {
+          const previewUrl = getPreviewContent(extractedCode, firstDropdownValue);
+          console.log(`Generated preview URL for index ${index}:`, previewUrl);
+          // Only return the URL if it's a valid blob URL, otherwise return null
+          const isValidUrl = previewUrl && previewUrl.startsWith('blob:');
+          console.log(`URL validation for index ${index}:`, isValidUrl);
+          return isValidUrl ? previewUrl : null;
+        }
       }
       return null;
     });
+    
+    console.log("Final preview URLs array length:", newPreviewUrls.length);
+    console.log("Final preview URLs detailed:", newPreviewUrls.map((url, i) => `[${i}]: ${url || 'null'}`));
 
     // Clean up old URLs
     previewUrls.forEach(url => {
@@ -798,12 +827,23 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         automaticLayout: true,
                       }}
                     />
-                  ) : (
+                  ) : previewUrls[index + 1] ? (
                     <PreviewFrame
-                      src={previewUrls[index] || ''}
+                      src={previewUrls[index + 1]!}
                       title={`Preview ${index + 1}`}
                       sandbox="allow-scripts allow-same-origin"
                     />
+                  ) : (
+                    <Box sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      height: '100%',
+                      color: '#9d9d9d',
+                      fontSize: '0.875rem'
+                    }}>
+                      No preview available. Generate code to see preview.
+                    </Box>
                   )}
                 </Box>
               </EditorWrapper>

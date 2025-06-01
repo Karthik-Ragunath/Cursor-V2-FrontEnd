@@ -30,9 +30,14 @@ latest_responses: List[Dict[str, Any]] = []
 frontend_info_cache: Dict[str, Any] = {}
 
 # Model mappings
+# MODEL_ZOO = {
+#     'claude-3.5': 'claude-3-sonnet-20240229',
+#     'deepseek': 'deepseek-chat'
+# }
 MODEL_ZOO = {
-    'claude-3.5': 'claude-3-sonnet-20240229',
-    'deepseek': 'deepseek-chat'
+    'claude-3.5': 'claude-3-5-sonnet-20240620',
+    'claude-3-haiku': 'claude-3-haiku-20240307',
+    'deepseek': 'deepseek-ai/deepseek-coder-7b-instruct-v1.5'
 }
 
 # Configure CORS
