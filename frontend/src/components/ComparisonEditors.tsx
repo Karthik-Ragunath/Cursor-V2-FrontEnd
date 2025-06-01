@@ -10,6 +10,7 @@ import {
   Mic as MicIcon,
   MicOff as MicOffIcon,
   Stop as StopIcon,
+  SwapHoriz as SwapHorizIcon,
 } from '@mui/icons-material';
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
@@ -515,14 +516,21 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [explanations, setExplanations] = useState<string[]>(Array(count).fill(''));
   const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [voiceMode, setVoiceMode] = useState<'replace' | 'append'>('replace');
 
   // Ensure firstDropdownValue is always a string
   const language = firstDropdownValue || 'html';
 
-  // Voice input integration
+  // Voice input integration - Fixed to avoid prepending
   const handleVoiceTranscript = (transcript: string) => {
-    const newPrompt = prompt ? `${prompt} ${transcript}` : transcript;
-    onPromptChange(newPrompt.trim());
+    if (voiceMode === 'replace') {
+      // Replace the entire prompt with the new transcript
+      onPromptChange(transcript.trim());
+    } else {
+      // Append to existing prompt (original behavior)
+      const newPrompt = prompt ? `${prompt} ${transcript}` : transcript;
+      onPromptChange(newPrompt.trim());
+    }
   };
 
   const {
@@ -881,22 +889,37 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   fullWidth
                 />
                 {voiceSupported && (
-                  <Tooltip title={isListening ? "Stop voice input" : "Start voice input"} placement="top">
-                    <IconButton
-                      onClick={isListening ? stopListening : startListening}
-                      disabled={isSubmitting}
-                      sx={{
-                        color: isListening ? '#ff6b6b' : '#9d9d9d',
-                        '&:hover': { color: isListening ? '#ff5252' : '#fff' },
-                        '&.Mui-disabled': { color: '#4d4d4d' },
-                        animation: isListening ? 'pulse 1.5s infinite' : 'none',
-                        minWidth: '48px',
-                        height: '48px',
-                      }}
-                    >
-                      {isListening ? <StopIcon /> : <MicIcon />}
-                    </IconButton>
-                  </Tooltip>
+                  <>
+                    <Tooltip title={`Voice mode: ${voiceMode === 'replace' ? 'Replace' : 'Append'} text`} placement="top">
+                      <IconButton
+                        onClick={() => setVoiceMode(voiceMode === 'replace' ? 'append' : 'replace')}
+                        sx={{
+                          color: voiceMode === 'replace' ? '#4CAF50' : '#FF9800',
+                          '&:hover': { color: voiceMode === 'replace' ? '#45a049' : '#e68900' },
+                          minWidth: '48px',
+                          height: '48px',
+                        }}
+                      >
+                        <SwapHorizIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title={isListening ? "Stop voice input" : "Start voice input"} placement="top">
+                      <IconButton
+                        onClick={isListening ? stopListening : startListening}
+                        disabled={isSubmitting}
+                        sx={{
+                          color: isListening ? '#ff6b6b' : '#9d9d9d',
+                          '&:hover': { color: isListening ? '#ff5252' : '#fff' },
+                          '&.Mui-disabled': { color: '#4d4d4d' },
+                          animation: isListening ? 'pulse 1.5s infinite' : 'none',
+                          minWidth: '48px',
+                          height: '48px',
+                        }}
+                      >
+                        {isListening ? <StopIcon /> : <MicIcon />}
+                      </IconButton>
+                    </Tooltip>
+                  </>
                 )}
                 <IconButton
                   onClick={handlePromptSubmit}
