@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any, Deque
@@ -15,6 +15,9 @@ import pathlib
 from jinja2 import Environment, FileSystemLoader
 import re
 import time
+
+# Import Whisper service
+from whisper_service import get_whisper_service, transcribe_audio_bytes
 
 # Load environment variables
 load_dotenv()
@@ -642,3 +645,209 @@ async def clear_prompt_history():
     prompt_history.clear()
     await broadcast_history()
     return {"message": "History cleared"}
+
+# Whisper Speech-to-Text Endpoints
+class TranscriptionRequest(BaseModel):
+    """Request model for audio transcription"""
+    language: Optional[str] = None  # Language code (e.g., "en", "es", "fr") or None for auto-detect
+    sample_rate: Optional[int] = 16000  # Sample rate of audio data
+
+class TranscriptionResponse(BaseModel):
+    """Response model for audio transcription"""
+    text: str
+    language: str
+    success: bool
+    error: Optional[str] = None
+    processing_time: Optional[float] = None
+
+@app.post("/whisper/transcribe", response_model=TranscriptionResponse)
+async def transcribe_audio_file(
+    audio_file: UploadFile = File(...),
+    language: Optional[str] = Form(None)
+):
+    """
+    Transcribe audio file using Whisper
+    
+    Args:
+        audio_file: Audio file (WAV, MP3, M4A, etc.)
+        language: Language code for transcription (optional)
+    
+    Returns:
+        TranscriptionResponse with transcribed text
+    """
+    start_time = time.time()
+    
+    try:
+        # Validate file type
+        if not audio_file.content_type or not audio_file.content_type.startswith('audio/'):
+            logger.warning(f"Invalid file type: {audio_file.content_type}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file type. Expected audio file, got: {audio_file.content_type}"
+            )
+        
+        # Read audio file
+        audio_data = await audio_file.read()
+        logger.info(f"Received audio file: {audio_file.filename} ({len(audio_data)} bytes)")
+        
+        # Save to temporary file for processing
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=f".{audio_file.filename.split('.')[-1]}", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_path = temp_file.name
+        
+        try:
+            # Get Whisper service and transcribe
+            whisper_service = get_whisper_service()
+            result = whisper_service.transcribe_file(temp_path, language)
+            
+            processing_time = time.time() - start_time
+            
+            if result["success"]:
+                logger.info(f"✅ Transcription successful in {processing_time:.2f}s: {result['text'][:100]}...")
+                return TranscriptionResponse(
+                    text=result["text"],
+                    language=result["language"],
+                    success=True,
+                    processing_time=processing_time
+                )
+            else:
+                logger.error(f"❌ Transcription failed: {result['error']}")
+                return TranscriptionResponse(
+                    text="",
+                    language="unknown",
+                    success=False,
+                    error=result["error"],
+                    processing_time=processing_time
+                )
+                
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_path)
+            
+    except Exception as e:
+        processing_time = time.time() - start_time
+        error_msg = f"Transcription error: {str(e)}"
+        logger.error(error_msg)
+        return TranscriptionResponse(
+            text="",
+            language="unknown",
+            success=False,
+            error=error_msg,
+            processing_time=processing_time
+        )
+
+@app.post("/whisper/transcribe-raw", response_model=TranscriptionResponse)
+async def transcribe_raw_audio(
+    request: TranscriptionRequest,
+    audio_data: bytes = File(...)
+):
+    """
+    Transcribe raw audio data using Whisper
+    
+    Args:
+        request: TranscriptionRequest with options
+        audio_data: Raw audio data as bytes
+    
+    Returns:
+        TranscriptionResponse with transcribed text
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Received raw audio data: {len(audio_data)} bytes, sample_rate: {request.sample_rate}")
+        
+        # Transcribe using Whisper service
+        result = transcribe_audio_bytes(
+            audio_data, 
+            sample_rate=request.sample_rate,
+            language=request.language
+        )
+        
+        processing_time = time.time() - start_time
+        
+        if result["success"]:
+            logger.info(f"✅ Raw transcription successful in {processing_time:.2f}s: {result['text'][:100]}...")
+            return TranscriptionResponse(
+                text=result["text"],
+                language=result["language"],
+                success=True,
+                processing_time=processing_time
+            )
+        else:
+            logger.error(f"❌ Raw transcription failed: {result['error']}")
+            return TranscriptionResponse(
+                text="",
+                language="unknown",
+                success=False,
+                error=result["error"],
+                processing_time=processing_time
+            )
+            
+    except Exception as e:
+        processing_time = time.time() - start_time
+        error_msg = f"Raw transcription error: {str(e)}"
+        logger.error(error_msg)
+        return TranscriptionResponse(
+            text="",
+            language="unknown",
+            success=False,
+            error=error_msg,
+            processing_time=processing_time
+        )
+
+@app.get("/whisper/info")
+async def get_whisper_info():
+    """
+    Get information about the Whisper service
+    
+    Returns:
+        Dict with Whisper model information
+    """
+    try:
+        whisper_service = get_whisper_service()
+        info = whisper_service.get_model_info()
+        logger.info("📊 Whisper service info requested")
+        return {
+            "status": "available",
+            "model_info": info,
+            "supported_languages": list(info["available_languages"].keys()),
+            "endpoint": "/whisper/transcribe"
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting Whisper info: {e}")
+        return {
+            "status": "unavailable",
+            "error": str(e)
+        }
+
+@app.post("/whisper/health")
+async def whisper_health_check():
+    """
+    Health check for Whisper service
+    
+    Returns:
+        Health status of the Whisper service
+    """
+    try:
+        whisper_service = get_whisper_service()
+        info = whisper_service.get_model_info()
+        
+        if info["is_loaded"]:
+            return {
+                "status": "healthy",
+                "model_size": info["model_size"],
+                "device": info["device"],
+                "message": "Whisper service is ready"
+            }
+        else:
+            return {
+                "status": "unhealthy", 
+                "message": "Whisper model not loaded"
+            }
+    except Exception as e:
+        logger.error(f"❌ Whisper health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }

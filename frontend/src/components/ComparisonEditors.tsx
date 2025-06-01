@@ -13,7 +13,7 @@ import {
 } from '@mui/icons-material';
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
 
 // TypeScript declarations for Speech Recognition
 declare global {
@@ -531,7 +531,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     error: voiceError,
     startListening,
     stopListening
-  } = useSpeechRecognition({
+  } = useWhisperRecognition({
     onTranscript: handleVoiceTranscript
   });
 
