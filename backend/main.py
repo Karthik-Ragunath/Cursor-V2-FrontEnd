@@ -14,6 +14,7 @@ from uvicorn.logging import DefaultFormatter
 import pathlib
 from jinja2 import Environment, FileSystemLoader
 import re
+import time
 
 # Load environment variables
 load_dotenv()
@@ -30,11 +31,20 @@ prompt_history: Deque[Dict[str, Any]] = deque(maxlen=10)
 latest_responses: List[Dict[str, Any]] = []
 frontend_info_cache: Dict[str, Any] = {}
 
-# Model mappings
+# Model configurations
 MODEL_ZOO = {
-    'claude-3.5': 'claude-3-5-sonnet-20240620',
+    'claude-3.5': 'claude-3-5-sonnet-20241022',
     'claude-3-haiku': 'claude-3-haiku-20240307',
     'deepseek': 'deepseek-ai/deepseek-coder-7b-instruct-v1.5'
+}
+
+# Local manim model server configuration
+MANIM_MODEL_SERVER_URL = "http://localhost:8001"
+
+# Mapping for manim models
+MANIM_MODEL_MAPPING = {
+    'Main Finetuned': 'finetuned',  # Maps to LoRA finetuned model
+    'Deepseek': 'base'             # Maps to base model
 }
 
 # Configure CORS
@@ -234,10 +244,37 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
             full_prompt = process_prompt(history_list, prompt, language)
             
             logger.debug(f"Generating code for model: {model}, language: {language}")
-            logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
             
             async with httpx.AsyncClient(timeout=300.0) as client:
-                if model in ['claude-3.5', 'claude-3-haiku']:  # Handle both Claude models
+                # Handle manim models first
+                if language == 'manim' and model in MANIM_MODEL_MAPPING:
+                    model_type = MANIM_MODEL_MAPPING[model]
+                    logger.debug(f"Sending request to local manim model server for {model} -> {model_type}")
+                    
+                    response = await client.post(
+                        f"{MANIM_MODEL_SERVER_URL}/generate",
+                        json={
+                            "prompt": full_prompt,
+                            "model_type": model_type,
+                            "max_new_tokens": 3600,
+                            "temperature": 0.8
+                        }
+                    )
+                    
+                    if response.status_code != 200:
+                        error_msg = f"Local manim model error: {response.text}"
+                        logger.error(error_msg)
+                        last_error = error_msg
+                        retry_count += 1
+                        continue
+                        
+                    result = response.json()
+                    logger.debug(f"Received response from local manim model server")
+                    return result['generated_code'].strip()
+                
+                # Handle other models
+                elif model in ['claude-3.5', 'claude-3-haiku']:  # Handle both Claude models
+                    logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
                     headers = {
                         "x-api-key": os.getenv('ANTHROPIC_API_KEY'),
                         "anthropic-version": "2023-06-01",
@@ -268,10 +305,10 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         
                     result = response.json()
                     logger.debug(f"Received response from Claude API for {model}")
-                    # Return the complete response without filtering
                     return result['content'][0]['text'].strip()
                 
-                elif model == 'deepseek':  # Deepseek model
+                elif model == 'deepseek':  # Deepseek model for non-manim languages
+                    logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
                     headers = {
                         "Authorization": f"Bearer {os.getenv('HUGGINGFACE_API_KEY')}",
                         "Content-Type": "application/json"
@@ -301,14 +338,13 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         
                     result = response.json()
                     logger.debug(f"Received response from Deepseek API")
-                    # Return the complete response without filtering
                     return result['choices'][0]['message']['content'].strip()
                     
                 else:
-                    error_msg = f"Unsupported model: {model}"
+                    error_msg = f"Unsupported model: {model} for language: {language}"
                     logger.error(error_msg)
                     raise HTTPException(status_code=400, detail=error_msg)
-                    
+
         except Exception as e:
             error_msg = f"API error for {model}: {str(e)}"
             logger.error(error_msg)
