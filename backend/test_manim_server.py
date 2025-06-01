@@ -94,12 +94,15 @@ async def main():
     print("=" * 60)
     
     # Test prompts
+    # test_prompts = [
+    #     "Create a simple scene that displays the text 'Hello Manim' in the center of the screen.",
+    #     "Create an animation showing a circle transforming into a square.",
+    #     "Create a scene with a mathematical equation f(x) = x^2 and show its graph."
+    # ]
     test_prompts = [
-        "Create a simple scene that displays the text 'Hello Manim' in the center of the screen.",
-        "Create an animation showing a circle transforming into a square.",
+        "How does visualizing the Miller-Rabin test as a series of transformations in complex space help in understanding its error margin?",
         "Create a scene with a mathematical equation f(x) = x^2 and show its graph."
     ]
-    
     # Step 1: Health check
     if not await test_health_check():
         print("❌ Server is not healthy. Please check if it's running.")

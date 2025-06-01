@@ -254,7 +254,7 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                     response = await client.post(
                         f"{MANIM_MODEL_SERVER_URL}/generate",
                         json={
-                            "prompt": full_prompt,
+                            "prompt": prompt,  # Use simple prompt for manim models
                             "model_type": model_type,
                             "max_new_tokens": 3600,
                             "temperature": 0.8
