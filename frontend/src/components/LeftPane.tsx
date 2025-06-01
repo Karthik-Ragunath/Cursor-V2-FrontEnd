@@ -134,49 +134,64 @@ const LeftPane: React.FC<LeftPaneProps> = ({
         </Typography>
         <FormControl>
         <RadioGroup
-  value={secondRadioValue}
-  onChange={(e) => onSecondRadioChange(e.target.value)}
->
-  <FormControlLabel
-    value="none"
-    control={
-      <Radio
-        sx={{
-          color: '#9d9d9d',
-          '&.Mui-checked': { color: '#fff' }
-        }}
-      />
-    }
-    label="No Comparison"
-    sx={{ color: '#fff' }}
-  />
-  <FormControlLabel
-    value="1"
-    control={
-      <Radio
-        sx={{
-          color: '#9d9d9d',
-          '&.Mui-checked': { color: '#fff' }
-        }}
-      />
-    }
-    label="1 Model"
-    sx={{ color: '#fff' }}
-  />
-  <FormControlLabel
-    value="2"
-    control={
-      <Radio
-        sx={{
-          color: '#9d9d9d',
-          '&.Mui-checked': { color: '#fff' }
-        }}
-      />
-    }
-    label="2 Models"
-    sx={{ color: '#fff' }}
-  />
-</RadioGroup>
+          value={secondRadioValue}
+          onChange={(e) => onSecondRadioChange(e.target.value)}
+        >
+          <FormControlLabel
+            value="none"
+            control={
+              <Radio
+                sx={{
+                  color: '#9d9d9d',
+                  '&.Mui-checked': { color: '#fff' }
+                }}
+              />
+            }
+            label="No Comparison"
+            sx={{ color: '#fff' }}
+          />
+          <FormControlLabel
+            value="1"
+            control={
+              <Radio
+                sx={{
+                  color: '#9d9d9d',
+                  '&.Mui-checked': { color: '#fff' }
+                }}
+              />
+            }
+            label="1 Model"
+            sx={{ color: '#fff' }}
+          />
+          <FormControlLabel
+            value="2"
+            control={
+              <Radio
+                sx={{
+                  color: '#9d9d9d',
+                  '&.Mui-checked': { color: '#fff' }
+                }}
+              />
+            }
+            label="2 Models"
+            sx={{ color: '#fff' }}
+          />
+          {/* Temporarily disabled while debugging
+          <FormControlLabel
+            value="3"
+            control={
+              <Radio
+                sx={{
+                  color: '#9d9d9d',
+                  '&.Mui-checked': { color: '#fff' }
+                }}
+              />
+            }
+            label="3 Models"
+            sx={{ color: '#fff' }}
+          />
+          */}
+        </RadioGroup>
 
         </FormControl>
 

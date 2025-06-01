@@ -24,6 +24,9 @@ const EditorsContainer = styled(Box)({
   gap: '4px',
   overflow: 'hidden',
   padding: '4px',
+  '& > *': {
+    flex: '1 1 0',
+  }
 });
 
 const EditorWrapper = styled(Box)({
@@ -33,7 +36,7 @@ const EditorWrapper = styled(Box)({
   display: 'flex',
   flexDirection: 'column',
   backgroundColor: '#1e1e1e',
-  minWidth: '200px',
+  minWidth: '150px',
   overflow: 'hidden',
 });
 
@@ -149,6 +152,7 @@ const ViewToggle = styled(ToggleButtonGroup)(({ theme }) => ({
 
 const languageModels = [
   { value: 'claude-3.5', label: 'Claude-3.5' },
+  { value: 'claude-3-haiku', label: 'Claude-3 Haiku' },
   { value: 'deepseek', label: 'Deepseek Coder' }
 ];
 
@@ -320,21 +324,33 @@ const getPreviewContent = (code: string, language: string): string => {
   
   // Clean the code to ensure only code is displayed
   const { code: extractedCode } = extractCodeAndExplanation(code, language);
-  
+  console.log("Extracted code:", extractedCode);
   switch (language.toLowerCase()) {
     case 'html':
-      return URL.createObjectURL(new Blob([`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body>
-            ${extractedCode}
-          </body>
-        </html>
-      `], { type: 'text/html' }));
+      const isCompleteHTML = extractedCode.trim().toLowerCase().includes('<!doctype') || 
+                            extractedCode.trim().toLowerCase().includes('<html');
+      
+      if (isCompleteHTML) {
+        // Use the code as-is since it's already a complete HTML document
+        console.log("Extracted code is complete HTML:", "YAYYYYYYY !!!");
+        const blobUrl = URL.createObjectURL(new Blob([extractedCode], { type: 'text/html' }));
+        console.log("Generated blob URL:", blobUrl);
+        return blobUrl;
+      } else {
+        // Wrap partial HTML content in a document structure
+        return URL.createObjectURL(new Blob([`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body>
+              ${extractedCode}
+            </body>
+          </html>
+        `], { type: 'text/html' }));
+      }
       
     case 'css':
       return URL.createObjectURL(new Blob([`
@@ -446,24 +462,41 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   useEffect(() => {
     if (secondRadioValue === 'none') {
       setSelectedModels([]);
-      setViewModes(Array(2).fill('code'));
+      setViewModes(Array(1).fill('code'));
       return;
     }
 
-    // Set up models based on comparison mode
-    if (secondRadioValue === '1') {
+    const modelCount = parseInt(secondRadioValue);
+    
+    // Set up default models based on comparison mode
+    console.log('Model count:', modelCount);
+    if (modelCount === 1) {
       setSelectedModels(['claude-3.5']);
       setViewModes(Array(1).fill('code'));
-    } else if (secondRadioValue === '2') {
-      setSelectedModels(['claude-3.5', 'deepseek']);
+    } else if (modelCount === 2) {
+      // Set both models by default
+      setSelectedModels(['claude-3.5', 'claude-3-haiku']);
       setViewModes(Array(2).fill('code'));
+    } else if (modelCount === 3) {
+      setSelectedModels(['claude-3.5', 'claude-3-haiku', 'deepseek']);
+      setViewModes(Array(3).fill('code'));
     }
+
+    // Ensure view modes array matches the model count
+
+    setViewModes(prev => {
+      if (prev.length !== modelCount) {
+        return Array(modelCount).fill('code');
+      }
+      return prev;
+    });
   }, [secondRadioValue]);
 
   const handleModelChange = (index: number) => (event: SelectChangeEvent) => {
     const newModels = [...selectedModels];
     newModels[index] = event.target.value;
     setSelectedModels(newModels);
+    console.log('Models updated:', newModels); // Debug log
   };
 
   const handleEditorDidMount = (editor: EditorMountParameters['editor'], monaco: EditorMountParameters['monaco'], index: number) => {
@@ -571,48 +604,57 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      const requests = selectedModels.map((model, index) => ({
+      // Create requests for all selected models
+      console.log('Selected models:', selectedModels);
+      const requests = activeModels.map((model) => ({
         code: codes[0] || '',  // Ensure code is never undefined
         language: firstDropdownValue?.toLowerCase() || 'html',
         prompt: prompt,
         model: model
-      })).filter(req => req.model) as CodeExecuteRequest[];
-
+      }));
+      
+      console.log('Sending requests:', requests);
       const data = await compareCode(requests);
+      console.log('Received response:', data);
 
       if (data.error) {
+        console.error('Error from API:', data.error);
         setError(data.error);
         return;
       }
 
       if (data.results && Array.isArray(data.results)) {
-        let hasError = false;
+        console.log('Processing results:', data.results);
+        let errorOccurred = false;
         data.results.forEach((result: CodeResult, index: number) => {
           if (result.error) {
-            hasError = true;
+            errorOccurred = true;
+            console.error(`Error for ${result.model}:`, result.error);
             setError(`Error for ${result.model}: ${result.error}`);
           } else if (result.code) {
-            const { code, explanation } = extractCodeAndExplanation(result.code || '', firstDropdownValue);
-            onCodeChange(index + 1)(code);
+            console.log(`Processing code for ${result.model}`);
+            const extractedResult = extractCodeAndExplanation(result.code || '', firstDropdownValue);
+            onCodeChange(index + 1)(extractedResult.code);
             
             const newExplanations = [...explanations];
-            newExplanations[index + 1] = explanation;
+            newExplanations[index + 1] = extractedResult.explanation;
             setExplanations(newExplanations);
             
             if (editorInstances[index]) {
-              editorInstances[index].setValue(code);
+              console.log(`Updating editor instance ${index} for ${result.model}`);
+              editorInstances[index].setValue(extractedResult.code);
             }
           }
         });
         
-        if (!hasError) {
+        if (!errorOccurred) {
           setError(null);
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      setError(errorMessage);
       console.error('Error executing code:', error);
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -663,14 +705,23 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         {secondRadioValue !== 'none' && (
           <>
             <Box sx={{ p: 2, backgroundColor: '#2d2d2d', borderBottom: '1px solid #3d3d3d' }}>
-              <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+              <Box sx={{ 
+                display: 'flex', 
+                gap: 2, 
+                mb: 2,
+                flexWrap: 'wrap', // Allow wrapping for small screens
+                justifyContent: 'flex-start' 
+              }}>
                 {Array.from({ length: parseInt(secondRadioValue) }).map((_, index) => (
-                  <FormControl key={index} size="small" sx={{ minWidth: 200 }}>
+                  <FormControl key={index} size="small" sx={{ minWidth: 180, flex: '1 1 auto' }}>
                     <InputLabel sx={{ color: 'white' }}>Model {index + 1}</InputLabel>
                     <Select
                       value={selectedModels[index] || ''}
                       onChange={handleModelChange(index)}
-                      sx={{ color: 'white' }}
+                      sx={{ 
+                        color: 'white',
+                        maxWidth: '100%'
+                      }}
                     >
                       {languageModels.map((model) => (
                         <MenuItem key={model.value} value={model.value}>
@@ -798,13 +849,13 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         automaticLayout: true,
                       }}
                     />
-                  ) : (
+                  ) : previewUrls[index + 1] ? (
                     <PreviewFrame
-                      src={previewUrls[index] || ''}
+                      src={previewUrls[index+1] || ''}
                       title={`Preview ${index + 1}`}
                       sandbox="allow-scripts allow-same-origin"
                     />
-                  )}
+                  ) : null}
                 </Box>
               </EditorWrapper>
               {index < parseInt(secondRadioValue) - 1 && <ResizeHandle />}

@@ -13,6 +13,7 @@ import json
 from uvicorn.logging import DefaultFormatter
 import pathlib
 from jinja2 import Environment, FileSystemLoader
+import re
 
 # Load environment variables
 load_dotenv()
@@ -31,8 +32,9 @@ frontend_info_cache: Dict[str, Any] = {}
 
 # Model mappings
 MODEL_ZOO = {
-    'claude-3.5': 'claude-3-sonnet-20240229',
-    'deepseek': 'deepseek-chat'
+    'claude-3.5': 'claude-3-5-sonnet-20240620',
+    'claude-3-haiku': 'claude-3-haiku-20240307',
+    'deepseek': 'deepseek-ai/deepseek-coder-7b-instruct-v1.5'
 }
 
 # Configure CORS
@@ -106,10 +108,17 @@ async def broadcast_history():
         "type": "history_update",
         "data": list(prompt_history)
     }
+    disconnected = []
     for connection in active_connections:
         try:
             await connection.send_json(history_data)
-        except:
+        except Exception as e:
+            logger.error(f"Error broadcasting to client: {str(e)}")
+            disconnected.append(connection)
+    
+    # Clean up disconnected clients
+    for connection in disconnected:
+        if connection in active_connections:
             active_connections.remove(connection)
 
 async def log_prompt_history(entry: Dict[str, Any]):
@@ -127,17 +136,30 @@ async def websocket_endpoint(websocket: WebSocket):
             "type": "history_update",
             "data": list(prompt_history)
         })
+        
+        # Keep connection alive with ping/pong
         while True:
-            # Keep the connection alive and handle any incoming messages
-            data = await websocket.receive_text()
-            if data == "get_history":
-                await websocket.send_json({
-                    "type": "history_update",
-                    "data": list(prompt_history)
-                })
-    except:
+            try:
+                data = await websocket.receive_text()
+                if data == "ping":
+                    await websocket.send_text("pong")
+                elif data == "get_history":
+                    await websocket.send_json({
+                        "type": "history_update",
+                        "data": list(prompt_history)
+                    })
+            except Exception as e:
+                logger.error(f"WebSocket error: {str(e)}")
+                break
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {str(e)}")
+    finally:
         if websocket in active_connections:
             active_connections.remove(websocket)
+        try:
+            await websocket.close()
+        except:
+            pass  # Connection might already be closed
 
 class CodeRequest(BaseModel):
     code: str
@@ -179,74 +201,140 @@ def get_system_prompt(language: str, prompt: str) -> str:
         logger.error(f"Error generating prompt for {language}: {str(e)}")
         return f"You are an expert {language} developer. Generate the code and add necessary comments and explanations as you see fit. User request: {prompt}"
 
+def extract_code_block(text: str) -> str:
+    """Extract only the code block from the response, removing any explanations."""
+    # Look for code between triple backticks
+    code_pattern = r"```(?:\w+)?\n([\s\S]*?)```"
+    matches = re.findall(code_pattern, text)
+    
+    if matches:
+        # Return the first code block found
+        return matches[0].strip()
+    else:
+        # If no code blocks found, return the original text
+        # but remove any markdown formatting or explanations
+        lines = text.split('\n')
+        code_lines = []
+        for line in lines:
+            # Skip lines that look like explanations or markdown
+            if line.strip().startswith(('#', '>', '-', '*')) or ':' in line[:20]:
+                continue
+            code_lines.append(line)
+        return '\n'.join(code_lines).strip()
+
 async def generate_code(prompt: str, language: str, model: str) -> str:
-    try:
-        # Get conversation history and create full prompt
-        history_list = list(prompt_history)[-9:]  # Get last 9 entries to add current as 10th
-        full_prompt = process_prompt(history_list, prompt, language)
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            if model == 'claude-3.5':
-                headers = {
-                    "x-api-key": os.getenv('ANTHROPIC_API_KEY'),
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                }
-                
-                response = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers=headers,
-                    json={
-                        "model": MODEL_ZOO[model],
-                        "max_tokens": 4000,
-                        "temperature": 0.7,
-                        "system": full_prompt,
-                        "messages": [
-                            {"role": "user", "content": "Generate the code based on the context provided."}
-                        ]
-                    }
-                )
-                
-                if response.status_code != 200:
-                    error_msg = f"Claude API error: {response.text}"
-                    raise HTTPException(status_code=response.status_code, detail=error_msg)
-                    
-                result = response.json()
-                return result['content'][0]['text'].strip()
+    max_retries = 3
+    retry_count = 0
+    last_error = None
+
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Model Used: {model} (Attempt {retry_count + 1}/{max_retries})")
+            # Get conversation history and create full prompt
+            history_list = list(prompt_history)[-9:]  # Get last 9 entries to add current as 10th
+            full_prompt = process_prompt(history_list, prompt, language)
             
-            elif model == 'deepseek':  # Deepseek model
-                headers = {
-                    "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
-                    "Content-Type": "application/json"
-                }
-                
-                response = await client.post(
-                    "https://api.deepseek.com/v1/chat/completions",
-                    headers=headers,
-                    json={
-                        "model": MODEL_ZOO[model],
-                        "messages": [
-                            {"role": "system", "content": full_prompt},
-                            {"role": "user", "content": "Generate the code based on the context provided."}
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 4000
+            logger.debug(f"Generating code for model: {model}, language: {language}")
+            logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
+            
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                if model in ['claude-3.5', 'claude-3-haiku']:  # Handle both Claude models
+                    headers = {
+                        "x-api-key": os.getenv('ANTHROPIC_API_KEY'),
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
                     }
-                )
-                
-                if response.status_code != 200:
-                    error_msg = f"Deepseek API error: {response.text}"
-                    raise HTTPException(status_code=response.status_code, detail=error_msg)
                     
-                result = response.json()
-                return result['choices'][0]['message']['content'].strip()
+                    logger.debug(f"Sending request to Claude API for model {model}")
+                    response = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json={
+                            "model": MODEL_ZOO[model],
+                            "max_tokens": 4000,
+                            "temperature": 0.1,
+                            "system": full_prompt,
+                            "messages": [
+                                {"role": "user", "content": "Generate ONLY the code. Do not add any explanations or comments outside the code block."}
+                            ]
+                        }
+                    )
+                    
+                    if response.status_code != 200:
+                        error_msg = f"Claude API error: {response.text}"
+                        logger.error(f"Claude API error for {model}: {response.text}")
+                        last_error = error_msg
+                        retry_count += 1
+                        continue
+                        
+                    result = response.json()
+                    logger.debug(f"Received response from Claude API for {model}")
+                    code = extract_code_block(result['content'][0]['text'].strip())
+                    
+                    # Verify we got valid code
+                    if not code or code.isspace():
+                        logger.warning(f"No valid code generated for {model} on attempt {retry_count + 1}")
+                        retry_count += 1
+                        continue
+                    
+                    return code
                 
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported model: {model}")
-                
-    except Exception as e:
-        error_msg = f"API error: {str(e)}"
-        raise HTTPException(status_code=500, detail=error_msg)
+                elif model == 'deepseek':  # Deepseek model
+                    headers = {
+                        "Authorization": f"Bearer {os.getenv('HUGGINGFACE_API_KEY')}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    logger.debug(f"Sending request to Deepseek API")
+                    response = await client.post(
+                        "https://router.huggingface.co/novita/v3/openai/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": MODEL_ZOO[model],
+                            "messages": [
+                                {"role": "system", "content": full_prompt},
+                                {"role": "user", "content": "Generate ONLY the code. Do not add any explanations or comments outside the code block."}
+                            ],
+                            "temperature": 0.7,
+                            "max_tokens": 4000
+                        }
+                    )
+                    
+                    if response.status_code != 200:
+                        error_msg = f"Deepseek API error: {response.text}"
+                        logger.error(f"Deepseek API error for {model}: {response.text}")
+                        last_error = error_msg
+                        retry_count += 1
+                        continue
+                        
+                    result = response.json()
+                    logger.debug(f"Received response from Deepseek API")
+                    code = extract_code_block(result['choices'][0]['message']['content'].strip())
+                    
+                    # Verify we got valid code
+                    if not code or code.isspace():
+                        logger.warning(f"No valid code generated for {model} on attempt {retry_count + 1}")
+                        retry_count += 1
+                        continue
+                    
+                    return code
+                    
+                else:
+                    error_msg = f"Unsupported model: {model}"
+                    logger.error(error_msg)
+                    raise HTTPException(status_code=400, detail=error_msg)
+                    
+        except Exception as e:
+            error_msg = f"API error for {model}: {str(e)}"
+            logger.error(error_msg)
+            last_error = error_msg
+            retry_count += 1
+            continue
+
+    # If we've exhausted all retries, raise the last error
+    error_msg = f"Failed to generate valid code after {max_retries} attempts. Last error: {last_error}"
+    logger.error(error_msg)
+    raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/validate")
 async def validate_code(request: CodeRequest):
@@ -287,6 +375,9 @@ async def save_imported_code(entry: PromptHistoryEntry):
 async def compare_code(requests: List[CodeRequest]):
     """Main endpoint for code generation."""
     try:
+        logger.debug(f"Received compare request with {len(requests)} models")
+        logger.debug(f"Request details: {[{'model': req.model, 'language': req.language} for req in requests]}")
+        
         # Validate language for all requests
         supported_languages = ["html", "css", "javascript", "manim"]
         for req in requests:
@@ -295,7 +386,9 @@ async def compare_code(requests: List[CodeRequest]):
 
         async def execute_model_request(req: CodeRequest) -> Dict[str, Any]:
             try:
+                logger.debug(f"Processing request for model: {req.model}")
                 if not req.model or not req.prompt:
+                    logger.debug(f"Skipping code generation for model {req.model} - missing model or prompt")
                     return {
                         "model": req.model,
                         "language": req.language,
@@ -305,43 +398,77 @@ async def compare_code(requests: List[CodeRequest]):
                         "error": None
                     }
                 
-                code = await generate_code(req.prompt, req.language, req.model)
-                return {
-                    "model": req.model,
-                    "language": req.language,
-                    "code": code,
-                    "prompt": req.prompt,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "error": None
-                }
+                try:
+                    logger.debug(f"Generating code for model {req.model}")
+                    code = await generate_code(req.prompt, req.language, req.model)
+                    logger.debug(f"Successfully generated code for model {req.model}")
+                    return {
+                        "model": req.model,
+                        "language": req.language,
+                        "code": code,
+                        "prompt": req.prompt,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "error": None
+                    }
+                except HTTPException as e:
+                    logger.error(f"HTTP error for model {req.model}: {e.detail}")
+                    return {
+                        "model": req.model,
+                        "language": req.language,
+                        "code": None,
+                        "prompt": req.prompt,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "error": str(e.detail)
+                    }
             except Exception as e:
+                error_msg = f"Error executing request for {req.model}: {str(e)}"
+                logger.error(error_msg)
                 return {
                     "model": req.model,
                     "language": req.language,
                     "code": None,
                     "prompt": req.prompt,
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "error": str(e)
+                    "error": error_msg
                 }
 
         # Execute all requests in parallel
+        logger.debug("Starting parallel execution of model requests")
         tasks = [execute_model_request(req) for req in requests]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        logger.debug(f"Completed parallel execution, received {len(results)} results")
         
-        # Update response history
+        # Process results and handle any exceptions
+        processed_results = []
         for result in results:
-            if not result.get("error"):
-                latest_responses.append(result)
-                if len(latest_responses) > 10:
-                    latest_responses.pop(0)
+            if isinstance(result, Exception):
+                logger.error(f"Exception in results: {str(result)}")
+                processed_results.append({
+                    "model": "unknown",
+                    "language": "unknown",
+                    "code": None,
+                    "prompt": None,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": str(result)
+                })
+            else:
+                logger.debug(f"Processing result for model: {result.get('model')}")
+                processed_results.append(result)
+                if not result.get("error"):
+                    latest_responses.append(result)
+                    if len(latest_responses) > 10:
+                        latest_responses.pop(0)
         
+        logger.debug(f"Returning {len(processed_results)} processed results")
         return {
-            "results": results,
+            "results": processed_results,
             "error": None
         }
             
     except Exception as e:
-        return {"results": None, "error": str(e)}
+        error_msg = f"Error in compare endpoint: {str(e)}"
+        logger.error(error_msg)
+        return {"results": None, "error": error_msg}
 
 @app.get("/frontend-info")
 async def get_frontend_info():

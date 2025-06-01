@@ -74,21 +74,40 @@ function App() {
 
   // Initialize WebSocket connection
   useEffect(() => {
+    let ws: WebSocket | null = null;
     let reconnectTimeout: number;
+    let pingInterval: number;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    const RECONNECT_DELAY = 3000; // 3 seconds
     
     const connectWebSocket = () => {
       try {
-        const websocket = new WebSocket('ws://localhost:8000/ws');
+        const newWs = new WebSocket('ws://localhost:8000/ws');
+        ws = newWs;
         
-        websocket.onopen = () => {
+        newWs.onopen = () => {
           console.log('Connected to WebSocket');
           setWsError(null);
+          reconnectAttempts = 0;
+          
+          // Start ping interval
+          pingInterval = window.setInterval(() => {
+            if (newWs?.readyState === WebSocket.OPEN) {
+              newWs.send('ping');
+            }
+          }, 30000); // Send ping every 30 seconds
+          
           // Request initial history
-          websocket.send('get_history');
+          newWs.send('get_history');
         };
 
-        websocket.onmessage = (event) => {
+        newWs.onmessage = (event) => {
           try {
+            if (event.data === 'pong') {
+              return; // Ignore pong responses
+            }
+            
             const data = JSON.parse(event.data);
             if (data.type === 'history_update' && Array.isArray(data.data)) {
               console.log('Received history update:', data.data);
@@ -100,33 +119,41 @@ function App() {
           }
         };
 
-        websocket.onerror = (error) => {
+        newWs.onerror = (error) => {
           console.error('WebSocket error:', error);
           setWsError('WebSocket connection error');
         };
 
-        websocket.onclose = () => {
+        newWs.onclose = () => {
           console.log('Disconnected from WebSocket');
-          setWsError('WebSocket disconnected, attempting to reconnect...');
-          reconnectTimeout = window.setTimeout(connectWebSocket, 5000);
+          clearInterval(pingInterval);
+          
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            setWsError(`WebSocket disconnected, attempting to reconnect... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+            reconnectTimeout = window.setTimeout(connectWebSocket, RECONNECT_DELAY);
+          } else {
+            setWsError('WebSocket disconnected. Maximum reconnection attempts reached. Please refresh the page.');
+          }
         };
 
-        return websocket;
+        setWs(newWs);
       } catch (error) {
         console.error('Failed to create WebSocket:', error);
         setWsError('Failed to create WebSocket connection');
-        reconnectTimeout = window.setTimeout(connectWebSocket, 5000);
-        return null;
+        
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttempts++;
+          reconnectTimeout = window.setTimeout(connectWebSocket, RECONNECT_DELAY);
+        }
       }
     };
 
-    const websocket = connectWebSocket();
-    if (websocket) {
-      setWs(websocket);
-    }
+    connectWebSocket();
 
     return () => {
-      window.clearTimeout(reconnectTimeout);
+      clearTimeout(reconnectTimeout);
+      clearInterval(pingInterval);
       if (ws?.readyState === WebSocket.OPEN) {
         ws.close();
       }
