@@ -1,20 +1,87 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, TextField, Typography, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft';
-import SendIcon from '@mui/icons-material/Send';
-import CodeIcon from '@mui/icons-material/Code';
-import PreviewIcon from '@mui/icons-material/Visibility';
+import { 
+  Send as SendIcon, 
+  Code as CodeIcon, 
+  Preview as PreviewIcon, 
+  KeyboardDoubleArrowLeft as KeyboardDoubleArrowLeftIcon,
+  ErrorOutline,
+  Mic as MicIcon,
+  MicOff as MicOffIcon,
+  Stop as StopIcon,
+  SwapHoriz as SwapHorizIcon,
+} from '@mui/icons-material';
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
-import { ErrorOutline } from '@mui/icons-material';
+import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
+
+// TypeScript declarations for Speech Recognition
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
+interface SpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+      isFinal: boolean;
+      length: number;
+    };
+    length: number;
+  };
+  resultIndex: number;
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
 
 const Container = styled(Box)({
   display: 'flex',
   flexDirection: 'column',
   height: '100%',
-  backgroundColor: '#1e1e1e',
   flex: 1,
+  backgroundColor: '#1e1e1e',
+  color: '#fff',
+  '& .MuiInputBase-root': {
+    color: '#fff',
+  },
+  '& .MuiOutlinedInput-notchedOutline': {
+    borderColor: '#3d3d3d',
+  },
+  '& .MuiInputLabel-root': {
+    color: '#9d9d9d',
+  },
+  '& .MuiSelect-icon': {
+    color: '#9d9d9d',
+  },
+  '& .MuiMenuItem-root': {
+    color: '#fff',
+    backgroundColor: '#2d2d2d',
+    '&:hover': {
+      backgroundColor: '#3d3d3d',
+    },
+  },
+  '@keyframes pulse': {
+    '0%': {
+      transform: 'scale(1)',
+      opacity: 1,
+    },
+    '50%': {
+      transform: 'scale(1.1)',
+      opacity: 0.7,
+    },
+    '100%': {
+      transform: 'scale(1)',
+      opacity: 1,
+    },
+  },
 });
 
 const EditorsContainer = styled(Box)({
@@ -449,9 +516,39 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [explanations, setExplanations] = useState<string[]>(Array(count).fill(''));
   const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [voiceMode, setVoiceMode] = useState<'replace' | 'append'>('replace');
 
   // Ensure firstDropdownValue is always a string
   const language = firstDropdownValue || 'html';
+
+  // Voice input integration - Fixed to avoid prepending
+  const handleVoiceTranscript = (transcript: string) => {
+    if (voiceMode === 'replace') {
+      // Replace the entire prompt with the new transcript
+      onPromptChange(transcript.trim());
+    } else {
+      // Append to existing prompt (original behavior)
+      const newPrompt = prompt ? `${prompt} ${transcript}` : transcript;
+      onPromptChange(newPrompt.trim());
+    }
+  };
+
+  const {
+    isListening,
+    isSupported: voiceSupported,
+    error: voiceError,
+    startListening,
+    stopListening
+  } = useWhisperRecognition({
+    onTranscript: handleVoiceTranscript
+  });
+
+  // Update error state if voice error occurs
+  useEffect(() => {
+    if (voiceError) {
+      setError(voiceError);
+    }
+  }, [voiceError]);
 
   useEffect(() => {
     if (secondRadioValue !== 'none') {
@@ -773,7 +870,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   </FormControl>
                 ))}
               </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
                 <StyledTextField
                   multiline
                   minRows={2}
@@ -791,15 +888,48 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   error={!!error}
                   fullWidth
                 />
+                {voiceSupported && (
+                  <>
+                    <Tooltip title={`Voice mode: ${voiceMode === 'replace' ? 'Replace' : 'Append'} text`} placement="top">
+                      <IconButton
+                        onClick={() => setVoiceMode(voiceMode === 'replace' ? 'append' : 'replace')}
+                        sx={{
+                          color: voiceMode === 'replace' ? '#4CAF50' : '#FF9800',
+                          '&:hover': { color: voiceMode === 'replace' ? '#45a049' : '#e68900' },
+                          minWidth: '48px',
+                          height: '48px',
+                        }}
+                      >
+                        <SwapHorizIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title={isListening ? "Stop voice input" : "Start voice input"} placement="top">
+                      <IconButton
+                        onClick={isListening ? stopListening : startListening}
+                        disabled={isSubmitting}
+                        sx={{
+                          color: isListening ? '#ff6b6b' : '#9d9d9d',
+                          '&:hover': { color: isListening ? '#ff5252' : '#fff' },
+                          '&.Mui-disabled': { color: '#4d4d4d' },
+                          animation: isListening ? 'pulse 1.5s infinite' : 'none',
+                          minWidth: '48px',
+                          height: '48px',
+                        }}
+                      >
+                        {isListening ? <StopIcon /> : <MicIcon />}
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                )}
                 <IconButton
                   onClick={handlePromptSubmit}
                   disabled={isSubmitting}
                   sx={{
                     color: '#9d9d9d',
-                    alignSelf: 'flex-start',
-                    mt: 1,
                     '&:hover': { color: '#fff' },
                     '&.Mui-disabled': { color: '#4d4d4d' },
+                    minWidth: '48px',
+                    height: '48px',
                   }}
                 >
                   {isSubmitting ? <CircularProgress size={24} /> : <SendIcon />}
