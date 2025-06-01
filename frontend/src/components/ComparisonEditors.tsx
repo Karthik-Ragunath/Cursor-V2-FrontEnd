@@ -468,17 +468,23 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
 
     const modelCount = parseInt(secondRadioValue);
     
-    // Set up default models based on comparison mode
+    // Set up default models based on comparison mode and language
     console.log('Model count:', modelCount);
+    
+    // Define model sets based on language
+    const manimModels = ['Main Finetuned', 'Deepseek', 'Claude'];
+    const defaultModels = ['claude-3.5', 'claude-3-haiku', 'deepseek'];
+    const availableModels = firstDropdownValue === 'manim' ? manimModels : defaultModels;
+    
     if (modelCount === 1) {
-      setSelectedModels(['claude-3.5']);
+      setSelectedModels([availableModels[0]]);
       setViewModes(Array(1).fill('code'));
     } else if (modelCount === 2) {
       // Set both models by default
-      setSelectedModels(['claude-3.5', 'claude-3-haiku']);
+      setSelectedModels([availableModels[0], availableModels[1]]);
       setViewModes(Array(2).fill('code'));
     } else if (modelCount === 3) {
-      setSelectedModels(['claude-3.5', 'claude-3-haiku', 'deepseek']);
+      setSelectedModels([availableModels[0], availableModels[1], availableModels[2]]);
       setViewModes(Array(3).fill('code'));
     }
 
@@ -490,7 +496,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       }
       return prev;
     });
-  }, [secondRadioValue]);
+  }, [secondRadioValue, firstDropdownValue]);
 
   const handleModelChange = (index: number) => (event: SelectChangeEvent) => {
     const newModels = [...selectedModels];
@@ -723,7 +729,11 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         maxWidth: '100%'
                       }}
                     >
-                      {languageModels.map((model) => (
+                      {(firstDropdownValue === 'manim' ? [
+                        { value: 'Main Finetuned', label: 'Manim Finetuned' },
+                        { value: 'Deepseek', label: 'Deepseek-Coder' },
+                        { value: 'Claude', label: 'Claude-3.5' }
+                      ] : languageModels).map((model) => (
                         <MenuItem key={model.value} value={model.value}>
                           {model.label}
                         </MenuItem>
