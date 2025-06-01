@@ -655,16 +655,27 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     newMode: 'code' | 'preview',
   ) => {
     if (newMode !== null) {
+      console.log(`View mode change for index ${index} to ${newMode}`);
+      console.log(`codes[${index + 1}]:`, codes[index + 1]?.substring(0, 100) + '...');
+      console.log('Full codes array:', codes.map((code, i) => `codes[${i}]: ${code ? code.substring(0, 50) + '...' : 'EMPTY'}`));
+      console.log('Current viewModes:', viewModes);
+      console.log('Selected models:', selectedModels);
+      
       const newViewModes = [...viewModes];
       newViewModes[index] = newMode;
       setViewModes(newViewModes);
       
       // Update preview content
       const codeContent = codes[index + 1];
+      console.log(`Code content for preview (index ${index + 1}):`, codeContent ? `${codeContent.length} characters` : 'EMPTY/NULL');
+      
       if (newMode === 'preview' && codeContent) {
         try {
           // The code will be extracted again in getPreviewContent
+          console.log(`Generating preview URL for index ${index}...`);
           const newUrl = getPreviewContent(codeContent, language);
+          console.log(`Generated preview URL:`, newUrl ? 'Success' : 'Failed');
+          
           const newPreviewUrls = [...previewUrls];
           
           // Clean up old URL if it exists
@@ -674,10 +685,13 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
           
           newPreviewUrls[index] = newUrl;
           setPreviewUrls(newPreviewUrls);
+          console.log(`Updated previewUrls[${index}]:`, newUrl ? 'Set' : 'Not set');
         } catch (error) {
           console.error('Error updating preview:', error);
           setError('Failed to update preview');
         }
+      } else if (newMode === 'preview' && !codeContent) {
+        console.warn(`No code content available for preview at index ${index + 1}`);
       } else if (newMode === 'code' && previewUrls[index]) {
         // Clean up URL when switching back to code view
         URL.revokeObjectURL(previewUrls[index]!);
@@ -829,8 +843,18 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   };
 
   const handleCodeChange = (index: number) => (newCode: string | undefined) => {
+    console.log(`handleCodeChange called for index ${index}:`, newCode ? `${newCode.length} characters` : 'EMPTY/UNDEFINED');
+    console.log(`Code preview for index ${index}:`, newCode?.substring(0, 100) + '...');
+    
     if (onCodeChange && typeof onCodeChange === 'function' && newCode !== undefined) {
+      console.log(`Calling parent onCodeChange(${index}) with code`);
       onCodeChange(index)(newCode);
+    } else {
+      console.warn(`onCodeChange not called for index ${index}:`, {
+        onCodeChangeExists: !!onCodeChange,
+        isFunction: typeof onCodeChange === 'function',
+        newCodeUndefined: newCode === undefined
+      });
     }
   };
 
@@ -1061,19 +1085,37 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         }}
                       />
                     </Box>
-                  ) : previewUrls[index] ? (
-                    <PreviewFrame
-                      src={previewUrls[index] || ''}
-                      title={`Preview ${index + 1}`}
-                      sandbox="allow-scripts allow-same-origin"
-                      style={{ 
+                  ) : viewModes[index] === 'preview' ? (
+                    previewUrls[index] ? (
+                      <PreviewFrame
+                        src={previewUrls[index] || ''}
+                        title={`Preview ${index + 1}`}
+                        sandbox="allow-scripts allow-same-origin"
+                        style={{ 
+                          flex: 1,
+                          height: '100%',
+                          border: 'none',
+                          backgroundColor: 'white',
+                          overflow: 'auto'
+                        }}
+                      />
+                    ) : (
+                      <Box sx={{ 
                         flex: 1,
-                        height: '100%',
-                        border: 'none',
-                        backgroundColor: 'white',
-                        overflow: 'auto'
-                      }}
-                    />
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#9d9d9d',
+                        backgroundColor: '#1e1e1e',
+                        padding: 2,
+                        textAlign: 'center'
+                      }}>
+                        {codes[index + 1] ? 
+                          'Generating preview...' : 
+                          'No code available for preview'
+                        }
+                      </Box>
+                    )
                   ) : null}
                 </Box>
               </EditorWrapper>
