@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, TextField, Typography, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft';
@@ -132,6 +132,12 @@ const PreviewFrame = styled('iframe')({
   height: '100%',
   border: 'none',
   backgroundColor: 'white',
+  transform: 'scale(0.99)',
+  transformOrigin: 'top left',
+  display: 'block',
+  margin: '0',
+  padding: '0',
+  overflow: 'auto'
 });
 
 const ViewToggle = styled(ToggleButtonGroup)(({ theme }) => ({
@@ -159,6 +165,8 @@ const languageModels = [
 interface CodeResult {
   model: string;
   code: string | null;
+  explanation: string | null;
+  cleanCode: string | null;
   language: string;
   prompt: string;
   timestamp: string;
@@ -319,115 +327,302 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
   };
 };
 
-const getPreviewContent = (code: string, language: string): string => {
-  if (!code) return '';
+const getPreviewContent = (code: string | null, language: string): string => {
+  if (!code) {
+    console.warn('No code provided to getPreviewContent');
+    return '';
+  }
   
-  // Clean the code to ensure only code is displayed
-  const { code: extractedCode } = extractCodeAndExplanation(code, language);
-  console.log("Extracted code:", extractedCode);
+  const codeToRender = code.trim();
+  console.log('Generating preview content:', {
+    language,
+    codeLength: codeToRender.length,
+    firstLines: codeToRender.split('\n').slice(0, 3)
+  });
+  
+  let content = '';
   switch (language.toLowerCase()) {
     case 'html':
-      const isCompleteHTML = extractedCode.trim().toLowerCase().includes('<!doctype') || 
-                            extractedCode.trim().toLowerCase().includes('<html');
-      
-      if (isCompleteHTML) {
-        // Use the code as-is since it's already a complete HTML document
-        console.log("Extracted code is complete HTML:", "YAYYYYYYY !!!");
-        const blobUrl = URL.createObjectURL(new Blob([extractedCode], { type: 'text/html' }));
-        console.log("Generated blob URL:", blobUrl);
-        return blobUrl;
-      } else {
-        // Wrap partial HTML content in a document structure
-        return URL.createObjectURL(new Blob([`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            </head>
-            <body>
-              ${extractedCode}
-            </body>
-          </html>
-        `], { type: 'text/html' }));
-      }
+      content = codeToRender;
+      break;
       
     case 'css':
-      return URL.createObjectURL(new Blob([`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>${extractedCode}</style>
-          </head>
-          <body>
-            <div class="preview-container">
-              <h1>Sample Heading</h1>
-              <p>Sample paragraph text</p>
-              <button>Sample Button</button>
-              <div class="sample-div">Sample Div</div>
-              <a href="#">Sample Link</a>
-            </div>
-          </body>
-        </html>
-      `], { type: 'text/html' }));
-      
-    case 'javascript':
-      const jsPreview = `
+      content = `
         <!DOCTYPE html>
         <html>
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-              #output { 
-                font-family: monospace;
-                white-space: pre-wrap;
-                padding: 10px;
-                background: #f5f5f5;
+              /* Reset default styles */
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body { padding: 20px; font-family: system-ui, -apple-system, sans-serif; }
+              
+              /* Preview container styles */
+              .preview-container {
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
               }
-              .error { color: red; }
+              
+              /* Default spacing for demo elements */
+              .preview-container > * { margin-bottom: 20px; }
+              
+              /* User's CSS */
+              ${codeToRender}
             </style>
           </head>
           <body>
+            <div class="preview-container">
+              <header>
+                <h1>CSS Preview</h1>
+                <nav>
+                  <a href="#">Link 1</a>
+                  <a href="#">Link 2</a>
+                  <a href="#">Link 3</a>
+                </nav>
+              </header>
+              
+              <main>
+                <section class="section-1">
+                  <h2>Section 1</h2>
+                  <p>This is a paragraph with <strong>bold</strong> and <em>italic</em> text.</p>
+                  <button class="primary-button">Primary Button</button>
+                  <button class="secondary-button">Secondary Button</button>
+                </section>
+                
+                <section class="section-2">
+                  <h3>Form Elements</h3>
+                  <form>
+                    <input type="text" placeholder="Text input">
+                    <input type="checkbox" id="check1"><label for="check1">Checkbox</label>
+                    <select><option>Dropdown</option></select>
+                  </form>
+                </section>
+                
+                <div class="card">
+                  <h3>Card Title</h3>
+                  <p>Card content with some text.</p>
+                </div>
+                
+                <div class="grid">
+                  <div class="grid-item">Grid Item 1</div>
+                  <div class="grid-item">Grid Item 2</div>
+                  <div class="grid-item">Grid Item 3</div>
+                </div>
+                
+                <footer>
+                  <p>Footer content</p>
+                  <div class="social-icons">
+                    <span class="icon">🌟</span>
+                    <span class="icon">💫</span>
+                    <span class="icon">✨</span>
+                  </div>
+                </footer>
+              </main>
+            </div>
+          </body>
+        </html>
+      `;
+      break;
+      
+    case 'javascript':
+      content = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { 
+                font-family: system-ui, -apple-system, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: #f8f9fa;
+              }
+              #output { 
+                font-family: 'Consolas', 'Monaco', monospace;
+                white-space: pre-wrap;
+                padding: 15px;
+                background: #fff;
+                border: 1px solid #e9ecef;
+                border-radius: 6px;
+                margin-bottom: 15px;
+                max-height: 400px;
+                overflow-y: auto;
+              }
+              #controls {
+                margin-bottom: 15px;
+              }
+              .error { 
+                color: #dc3545;
+                background: #ffe9e9;
+                padding: 10px;
+                border-radius: 4px;
+                margin: 10px 0;
+              }
+              .log { color: #0d6efd; }
+              .info { color: #198754; }
+              .warn { color: #ffc107; }
+              .error-msg { color: #dc3545; }
+              button {
+                background: #0d6efd;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+              }
+              button:hover {
+                background: #0b5ed7;
+              }
+              #interactive-area {
+                background: white;
+                padding: 15px;
+                border: 1px solid #e9ecef;
+                border-radius: 6px;
+                margin-top: 15px;
+              }
+            </style>
+          </head>
+          <body>
+            <div id="controls">
+              <button onclick="clearOutput()">Clear Console</button>
+            </div>
             <div id="output"></div>
+            <div id="interactive-area">
+              <h3>Interactive Area</h3>
+              <p>This area can be manipulated by your JavaScript code.</p>
+            </div>
             <script>
-              // Redirect console.log to output div
+              // Create output element reference
               const output = document.getElementById('output');
-              const originalLog = console.log;
-              console.log = function(...args) {
-                if (output) {
-                  output.innerHTML += args.map(arg => 
-                    typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-                  ).join(' ') + '\\n';
-                }
-                originalLog.apply(console, args);
+              const interactiveArea = document.getElementById('interactive-area');
+              
+              // Clear output function
+              function clearOutput() {
+                if (output) output.innerHTML = '';
+              }
+              
+              // Console overrides
+              const originalConsole = {
+                log: console.log,
+                info: console.info,
+                warn: console.warn,
+                error: console.error
               };
               
-              // Add error handling
-              window.onerror = function(msg) {
+              // Helper to format values
+              function formatValue(value) {
+                if (value === undefined) return 'undefined';
+                if (value === null) return 'null';
+                if (typeof value === 'object') {
+                  try {
+                    return JSON.stringify(value, null, 2);
+                  } catch (err) {
+                    return String(value);
+                  }
+                }
+                return String(value);
+              }
+              
+              // Override console methods
+              console.log = function(...args) {
                 if (output) {
-                  output.innerHTML += '<div class="error">Error: ' + msg + '</div>\\n';
+                  const formattedArgs = args.map(formatValue).join(' ');
+                  output.innerHTML += \`<div class="log">\${formattedArgs}</div>\`;
+                }
+                originalConsole.log.apply(console, args);
+              };
+              
+              console.info = function(...args) {
+                if (output) {
+                  const formattedArgs = args.map(formatValue).join(' ');
+                  output.innerHTML += \`<div class="info">ℹ️ \${formattedArgs}</div>\`;
+                }
+                originalConsole.info.apply(console, args);
+              };
+              
+              console.warn = function(...args) {
+                if (output) {
+                  const formattedArgs = args.map(formatValue).join(' ');
+                  output.innerHTML += \`<div class="warn">⚠️ \${formattedArgs}</div>\`;
+                }
+                originalConsole.warn.apply(console, args);
+              };
+              
+              console.error = function(...args) {
+                if (output) {
+                  const formattedArgs = args.map(formatValue).join(' ');
+                  output.innerHTML += \`<div class="error-msg">🚫 \${formattedArgs}</div>\`;
+                }
+                originalConsole.error.apply(console, args);
+              };
+              
+              // Error handling
+              window.onerror = function(msg, url, line, col, error) {
+                if (output) {
+                  output.innerHTML += \`<div class="error">🚫 Error: \${msg}\\nLine: \${line}, Column: \${col}</div>\`;
                 }
                 return false;
               };
-
-              // Execute the extracted code
+              
+              // Add error boundary
               try {
-                ${extractedCode}
+                // User's code
+                ${codeToRender}
               } catch (err) {
-                console.log('Error:', err.message);
+                console.error('Runtime Error:', err.message);
               }
             </script>
           </body>
         </html>
       `;
-      return URL.createObjectURL(new Blob([jsPreview], { type: 'text/html' }));
+      break;
       
     default:
+      console.warn('Unsupported language:', language);
       return '';
   }
+
+  console.log('Created preview content:', {
+    contentLength: content.length,
+    hasDoctype: content.includes('<!DOCTYPE html>'),
+    hasBody: content.includes('<body>'),
+    hasScript: content.includes('<script>')
+  });
+
+  return URL.createObjectURL(new Blob([content], { type: 'text/html' }));
+};
+
+const formatCodeWithExplanation = (code: string | null, explanation: string | null, language: string): string => {
+  if (!code) return '';
+  
+  // Format the explanation as comments based on the language
+  const formatExplanation = (exp: string | null): string => {
+    if (!exp) return '';
+    
+    const commentStart = language.toLowerCase() === 'html' ? '<!--' : 
+                        language.toLowerCase() === 'css' ? '/*' :
+                        '//';
+    const commentEnd = language.toLowerCase() === 'html' ? '-->' : 
+                      language.toLowerCase() === 'css' ? '*/' :
+                      '';
+    
+    // Split explanation into lines and add comment markers
+    const expLines = exp.split('\n').map(line => line.trim()).filter(Boolean);
+    const commentedExp = expLines.map(line => {
+      if (language.toLowerCase() === 'html' || language.toLowerCase() === 'css') {
+        return `${commentStart} ${line} ${commentEnd}`;
+      } else {
+        return `${commentStart} ${line}`;
+      }
+    }).join('\n');
+
+    return `\n\n"""Exp:\n${commentedExp}\n"""\n\n`;
+  };
+
+  return `${formatExplanation(explanation)}${code}`;
 };
 
 const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
@@ -447,8 +642,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [viewModes, setViewModes] = useState<('code' | 'preview')[]>(Array(count).fill('code'));
   const [previewUrls, setPreviewUrls] = useState<(string | null)[]>(Array(count).fill(null));
   const [explanations, setExplanations] = useState<string[]>(Array(count).fill(''));
-  const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
+  const editorInstancesMapRef = useRef<Map<string, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [cleanCodes, setCleanCodes] = useState<(string | null)[]>(Array(count).fill(null));
 
   // Ensure firstDropdownValue is always a string
   const language = firstDropdownValue || 'html';
@@ -468,23 +664,17 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
 
     const modelCount = parseInt(secondRadioValue);
     
-    // Set up default models based on comparison mode and language
+    // Set up default models based on comparison mode
     console.log('Model count:', modelCount);
-    
-    // Define model sets based on language
-    const manimModels = ['Main Finetuned', 'Deepseek', 'Claude'];
-    const defaultModels = ['claude-3.5', 'claude-3-haiku', 'deepseek'];
-    const availableModels = firstDropdownValue === 'manim' ? manimModels : defaultModels;
-    
     if (modelCount === 1) {
-      setSelectedModels([availableModels[0]]);
+      setSelectedModels(['claude-3.5']);
       setViewModes(Array(1).fill('code'));
     } else if (modelCount === 2) {
-      // Set both models by default
-      setSelectedModels([availableModels[0], availableModels[1]]);
+   
+      setSelectedModels(['claude-3.5', 'claude-3-haiku']);
       setViewModes(Array(2).fill('code'));
     } else if (modelCount === 3) {
-      setSelectedModels([availableModels[0], availableModels[1], availableModels[2]]);
+      setSelectedModels(['claude-3.5', 'claude-3-haiku', 'deepseek']);
       setViewModes(Array(3).fill('code'));
     }
 
@@ -495,7 +685,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       }
       return prev;
     });
-  }, [secondRadioValue, firstDropdownValue]);
+  }, [secondRadioValue]);
 
   const handleModelChange = (index: number) => (event: SelectChangeEvent) => {
     const newModels = [...selectedModels];
@@ -505,14 +695,10 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   };
 
   const handleEditorDidMount = (editor: EditorMountParameters['editor'], monaco: EditorMountParameters['monaco'], index: number) => {
-    const model = selectedModels[index];
-    console.log(`Editor mounted for model: ${model} at index ${index}`);
-    
-    // Store editor instance with model name as key
-    const newEditorInstancesMap = new Map(editorInstancesMap);
-    newEditorInstancesMap.set(model, editor);
-    console.log('Editor instances after mount:', Array.from(newEditorInstancesMap.keys()));
-    setEditorInstancesMap(newEditorInstancesMap);
+    // Store editor instance with index as key to ensure we have all editors
+    const editorIndex = index + 1;
+    editorInstancesMapRef.current.set(editorIndex.toString(), editor);
+    console.log(`Editor mounted for index ${editorIndex}, Current map keys:`, Array.from(editorInstancesMapRef.current.keys()));
     
     editor.updateOptions({
       minimap: { enabled: true },
@@ -535,35 +721,94 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     newMode: 'code' | 'preview',
   ) => {
     if (newMode !== null) {
-      const newViewModes = [...viewModes];
-      newViewModes[index] = newMode;
-      setViewModes(newViewModes);
-      
-      // Update preview content
-      const codeContent = codes[index + 1];
-      if (newMode === 'preview' && codeContent) {
-        try {
-          // The code will be extracted again in getPreviewContent
-          const newUrl = getPreviewContent(codeContent, language);
-          const newPreviewUrls = [...previewUrls];
+      try {
+        // Create new URL before updating view mode or cleaning up old URL
+        if (newMode === 'preview') {
+          // Get the code directly from the codes array using the same index
+          const currentCode = codes[index];
+          console.log('Switching to preview mode:', {
+            index,
+            hasCode: !!currentCode,
+            codeLength: currentCode?.length,
+            viewMode: newMode,
+            allCodes: codes.map(c => !!c),  // Log all code slots
+            viewModes,
+            previewUrls: previewUrls.map(u => !!u)  // Log all preview URLs
+          });
+
+          if (!currentCode) {
+            console.error('No code found for preview at index:', index);
+            setError('No code available for preview');
+            return;
+          }
+
+          // Extract clean code and create URL before any state updates
+          const { code: cleanCode } = extractCodeAndExplanation(currentCode, firstDropdownValue);
+          console.log('Extracted clean code:', {
+            cleanCodeLength: cleanCode?.length,
+            firstLines: cleanCode?.split('\n').slice(0, 3),
+            language: firstDropdownValue,
+            hasExplanation: currentCode.includes('"""Exp:')
+          });
+
+          if (!cleanCode) {
+            console.error('No clean code extracted');
+            setError('Failed to extract code for preview');
+            return;
+          }
+
+          const newUrl = getPreviewContent(cleanCode, firstDropdownValue);
+          console.log('Created preview URL:', {
+            hasUrl: !!newUrl,
+            urlLength: newUrl?.length,
+            language: firstDropdownValue
+          });
+
+          if (!newUrl) {
+            console.error('Failed to create preview URL');
+            setError('Failed to create preview');
+            return;
+          }
+
+          // Only after new URL is created, update states
+          const updatedViewModes = [...viewModes];
+          updatedViewModes[index] = newMode;
           
-          // Clean up old URL if it exists
+          const updatedPreviewUrls = [...previewUrls];
+          // Clean up old URL only after new one is created
           if (previewUrls[index]) {
+            console.log('Cleaning up old URL for index:', index);
             URL.revokeObjectURL(previewUrls[index]!);
           }
+          updatedPreviewUrls[index] = newUrl;
           
-          newPreviewUrls[index] = newUrl;
-          setPreviewUrls(newPreviewUrls);
-        } catch (error) {
-          console.error('Error updating preview:', error);
-          setError('Failed to update preview');
+          // Batch state updates
+          setViewModes(updatedViewModes);
+          setPreviewUrls(updatedPreviewUrls);
+
+          // Verify state updates
+          console.log('State updated:', {
+            newViewMode: updatedViewModes[index],
+            hasNewUrl: !!updatedPreviewUrls[index],
+            totalUrls: updatedPreviewUrls.filter(u => !!u).length
+          });
+        } else {
+          // For code view, update view mode first
+          const updatedViewModes = [...viewModes];
+          updatedViewModes[index] = newMode;
+          setViewModes(updatedViewModes);
+          
+          // Then clean up URL
+          if (previewUrls[index]) {
+            const updatedPreviewUrls = [...previewUrls];
+            URL.revokeObjectURL(previewUrls[index]!);
+            updatedPreviewUrls[index] = null;
+            setPreviewUrls(updatedPreviewUrls);
+          }
         }
-      } else if (newMode === 'code' && previewUrls[index]) {
-        // Clean up URL when switching back to code view
-        URL.revokeObjectURL(previewUrls[index]!);
-        const newPreviewUrls = [...previewUrls];
-        newPreviewUrls[index] = null;
-        setPreviewUrls(newPreviewUrls);
+      } catch (error) {
+        console.error('Error updating preview:', error);
+        setError('Failed to update preview');
       }
     }
   };
@@ -573,39 +818,45 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     
     try {
       const modelLabel = languageModels.find(model => model.value === selectedModels[index])?.label || 'Unknown';
+      // Get code directly from the current index, not index + 1
       const codeToImport = codes[index];
       
       if (!codeToImport) {
         console.error('No code to import');
+        setError('No code available to import');
         return;
       }
 
-      await fetch('http://localhost:8000/save-imported-code', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          timestamp: new Date().toLocaleTimeString(),
-          prompt: prompt,
-          language: firstDropdownValue,
-          model: selectedModels[index],
-          code: codeToImport,
-          description: `Imported code from ${modelLabel}`
-        }),
-      });
+      // When importing, we want just the code without the explanation
+      const { code: cleanCode } = extractCodeAndExplanation(codeToImport, firstDropdownValue);
+      if (!cleanCode) {
+        setError('Failed to extract code for import');
+        return;
+      }
 
-      onCodeChange(0)(codeToImport);
-      onEditorSelect(index);
+      // Import directly to the current editor
+      onCodeChange(0)(cleanCode);
+      onEditorSelect(0); // Select the main editor
+
+      // Show success message
+      setError('Code imported successfully');
+      
+      // Log the import for debugging
+      console.log('Code imported:', {
+        from: index,
+        model: modelLabel,
+        codeLength: cleanCode.length
+      });
     } catch (error) {
-      console.error('Error saving code history:', error);
+      console.error('Error importing code:', error);
+      setError('Failed to import code');
     }
   };
 
   const handlePromptSubmit = async () => {
     if (!prompt.trim() || isSubmitting) return;
     
-    const activeModels = selectedModels.filter(model => model);
+    const activeModels = selectedModels.filter(Boolean);
     if (activeModels.length === 0) {
       setError('Please select at least one model');
       return;
@@ -614,37 +865,32 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     setIsSubmitting(true);
     setError(null);
     try {
-      // Create requests for all selected models
-      console.log('Selected models:', selectedModels);
-      const requests = activeModels.map((model) => ({
-        code: codes[0] || '',  // Ensure code is never undefined
+      const requests: CodeExecuteRequest[] = activeModels.map((model) => ({
+        code: codes[0] || '',
         language: firstDropdownValue?.toLowerCase() || 'html',
         prompt: prompt,
         model: model
       }));
       
-      console.log('Sending requests:', requests);
-      const data = await compareCode(requests);
-      console.log('Received response:', data);
+      const response = await compareCode(requests);
 
-      if (data.error) {
-        console.error('Error from API:', data.error);
-        setError(data.error);
+      if (response.error) {
+        console.error('Error from API:', response.error);
+        setError(response.error);
         return;
       }
 
-      if (data.results && Array.isArray(data.results)) {
-        console.log('Processing results:', data.results);
+      if (response.results && Array.isArray(response.results)) {
         let errorOccurred = false;
 
         // Create a map of results by model
         const resultsByModel = new Map<string, CodeResult>(
-          data.results.map((result: CodeResult) => [result.model, result])
+          response.results.map((result: CodeResult) => [result.model, result])
         );
-        console.log('Results by model:', resultsByModel);
-        console.log('Current editor instances:', Array.from(editorInstancesMap.keys()));
         
         // Process results in the same order as selectedModels
+        const newCleanCodes = [...cleanCodes];
+        
         selectedModels.forEach((model, index) => {
           if (!model) return; // Skip empty model slots
           
@@ -661,29 +907,25 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
             console.error(`Error for ${result.model}:`, result.error);
             setError(`Error for ${result.model}: ${result.error}`);
           } else if (result.code) {
-            console.log(`Processing code for ${result.model}:
-              - Model index: ${index}
-              - Editor instance available: ${!!editorInstancesMap.get(model)}
-              - Code length: ${result.code.length}`);
-
+            // Format code with explanation
+            const formattedCode = formatCodeWithExplanation(result.code, result.explanation, firstDropdownValue);
+            
+            // Store the clean code for preview
+            newCleanCodes[index] = result.code;
+            
             // Update the code for the correct editor index
-            onCodeChange(index)(result.code);
+            onCodeChange(index)(formattedCode);
             
-            // Update explanations for the correct index
-            const newExplanations = [...explanations];
-            newExplanations[index] = ''; // Clear any previous explanation
-            setExplanations(newExplanations);
-            
-            // Update the editor instance using the model name
-            const editorInstance = editorInstancesMap.get(model);
+            const editorInstance = editorInstancesMapRef.current.get(index.toString());
             if (editorInstance) {
-              console.log(`Updating editor instance for ${model}`);
-              editorInstance.setValue(result.code);
+              editorInstance.setValue(formattedCode);
             } else {
-              console.error(`No editor instance found for model: ${model}`);
+              console.error(`No editor instance found for index ${index}`);
             }
           }
         });
+        
+        setCleanCodes(newCleanCodes);
         
         if (!errorOccurred) {
           setError(null);
@@ -706,35 +948,163 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
 
   // Update preview URLs and explanations when codes change
   useEffect(() => {
-    const newPreviewUrls = codes.map((code, index) => {
-      if (viewModes[index] === 'preview' && code) {
-        return getPreviewContent(code, firstDropdownValue);
+    // Keep track of the latest effect run to prevent stale updates
+    let isLatestEffect = true;
+    const activePreviewUrls = new Set<string>();
+
+    const updatePreviews = async () => {
+      try {
+        const newPreviewUrls = await Promise.all(codes.map(async (code, index) => {
+          if (!isLatestEffect) return null;
+          
+          if (viewModes[index] === 'preview' && code) {
+            try {
+              const { code: cleanCode } = extractCodeAndExplanation(code, firstDropdownValue);
+              if (!cleanCode) {
+                console.warn('No clean code extracted for preview', { index });
+                return null;
+              }
+
+              // Create new URL before cleaning up old one
+              const newUrl = getPreviewContent(cleanCode, firstDropdownValue);
+              if (!newUrl) {
+                console.warn('Failed to create preview URL', { index });
+                return null;
+              }
+
+              activePreviewUrls.add(newUrl);
+              return newUrl;
+            } catch (error) {
+              console.error('Error creating preview for index', index, error);
+              return null;
+            }
+          }
+          return null;
+        }));
+
+        if (!isLatestEffect) return;
+
+        // Clean up old URLs that are no longer active
+        previewUrls.forEach(url => {
+          if (url && !activePreviewUrls.has(url)) {
+            URL.revokeObjectURL(url);
+          }
+        });
+
+        setPreviewUrls(newPreviewUrls);
+
+        // Update explanations
+        const newExplanations = codes.map(code => {
+          if (!code) return '';
+          const { explanation } = extractCodeAndExplanation(code, firstDropdownValue);
+          return explanation || '';
+        });
+
+        if (!isLatestEffect) return;
+        setExplanations(newExplanations);
+      } catch (error) {
+        console.error('Error updating previews:', error);
+        if (isLatestEffect) {
+          setError('Failed to update previews');
+        }
       }
-      return null;
-    });
+    };
 
-    // Clean up old URLs
-    previewUrls.forEach(url => {
-      if (url) URL.revokeObjectURL(url);
-    });
+    updatePreviews();
 
-    setPreviewUrls(newPreviewUrls);
-
-    // Update explanations
-    const newExplanations = codes.map(code => {
-      const { explanation } = extractCodeAndExplanation(code, firstDropdownValue);
-      return explanation;
-    });
-
-    setExplanations(newExplanations);
-
-    // Cleanup on unmount
     return () => {
-      newPreviewUrls.forEach(url => {
-        if (url) URL.revokeObjectURL(url);
+      isLatestEffect = false;
+      // Clean up all URLs when unmounting
+      previewUrls.forEach(url => {
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
       });
     };
   }, [codes, viewModes, firstDropdownValue]);
+
+  // Update the preview component to handle rendering
+  const PreviewComponent = ({ src, title, index }: { src: string, title: string, index: number }) => {
+    const iframeRef = useRef<HTMLIFrameElement>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [hasError, setHasError] = useState(false);
+
+    useEffect(() => {
+      console.log('Preview frame mounted:', {
+        index,
+        hasSource: !!src,
+        sourceLength: src?.length
+      });
+    }, [src, index]);
+
+    const handleLoad = () => {
+      console.log('Preview frame loaded:', {
+        index,
+        hasContent: !!iframeRef.current?.contentWindow?.document.body.innerHTML,
+        contentLength: iframeRef.current?.contentWindow?.document.body.innerHTML.length
+      });
+      setIsLoading(false);
+      setHasError(false);
+    };
+
+    const handleError = () => {
+      console.error('Preview frame failed to load:', { index, src });
+      setIsLoading(false);
+      setHasError(true);
+    };
+
+    return (
+      <Box sx={{ 
+        height: '100%', 
+        width: '100%', 
+        position: 'relative',
+        backgroundColor: 'white',
+        overflow: 'hidden'
+      }}>
+        {isLoading && (
+          <Box sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(255, 255, 255, 0.8)'
+          }}>
+            <CircularProgress />
+          </Box>
+        )}
+        {hasError && (
+          <Box sx={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexDirection: 'column',
+            gap: 2,
+            backgroundColor: 'white'
+          }}>
+            <ErrorOutline color="error" />
+            <Typography color="error">Failed to load preview</Typography>
+          </Box>
+        )}
+        <PreviewFrame
+          ref={iframeRef}
+          src={src}
+          title={title}
+          sandbox="allow-scripts allow-same-origin"
+          onLoad={handleLoad}
+          onError={handleError}
+        />
+      </Box>
+    );
+  };
 
   return (
     <Container>
@@ -760,11 +1130,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         maxWidth: '100%'
                       }}
                     >
-                      {(firstDropdownValue === 'manim' ? [
-                        { value: 'Main Finetuned', label: 'Manim Finetuned' },
-                        { value: 'Deepseek', label: 'Deepseek-Coder' },
-                        { value: 'Claude', label: 'Claude-3.5' }
-                      ] : languageModels).map((model) => (
+                      {languageModels.map((model) => (
                         <MenuItem key={model.value} value={model.value}>
                           {model.label}
                         </MenuItem>
@@ -876,7 +1242,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   )}
                   {viewModes[index] === 'code' ? (
                     <Editor
-                      key={`editor-${index}`}
+                      key={`editor-${index}-${viewModes[index]}`}
                       height="100%"
                       defaultLanguage={firstDropdownValue}
                       value={codes[index] || ''}
@@ -892,12 +1258,31 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                       }}
                     />
                   ) : previewUrls[index] ? (
-                    <PreviewFrame
-                      src={previewUrls[index] || ''}
-                      title={`Preview ${index + 1}`}
-                      sandbox="allow-scripts allow-same-origin"
-                    />
-                  ) : null}
+                    <Box sx={{ height: '100%', width: '100%', position: 'relative', bgcolor: 'white' }}>
+                      <PreviewComponent
+                        src={previewUrls[index] || ''}
+                        title={`Preview ${index + 1}`}
+                        index={index}
+                      />
+                    </Box>
+                  ) : (
+                    <Box sx={{ 
+                      height: '100%', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      color: '#666',
+                      flexDirection: 'column',
+                      gap: 2
+                    }}>
+                      <Typography variant="body1" color="inherit">
+                        No preview available
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {error || 'No code to preview'}
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
               </EditorWrapper>
               {index < parseInt(secondRadioValue) - 1 && <ResizeHandle />}

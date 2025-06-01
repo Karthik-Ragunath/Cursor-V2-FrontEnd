@@ -210,26 +210,120 @@ def get_system_prompt(language: str, prompt: str) -> str:
         logger.error(f"Error generating prompt for {language}: {str(e)}")
         return f"You are an expert {language} developer. Generate the code and add necessary comments and explanations as you see fit. User request: {prompt}"
 
-def extract_code_block(text: str) -> str:
-    """Extract only the code block from the response, removing any explanations."""
-    # Look for code between triple backticks
-    code_pattern = r"```(?:\w+)?\n([\s\S]*?)```"
-    matches = re.findall(code_pattern, text)
+def extract_code_and_explanation(text: str) -> Dict[str, Any]:
+    """Extract code blocks and explanation from the text with specific formatting.
     
-    if matches:
-        # Return the first code block found
-        return matches[0].strip()
-    else:
-        # If no code blocks found, return the original text
-        # but remove any markdown formatting or explanations
+    Args:
+        text (str): The text containing code blocks and explanation
+        
+    Returns:
+        Dict[str, Any]: Dictionary containing:
+            - code_blocks: List of dictionaries with code and language info
+            - explanation: The explanation text if present
+    """
+    # First, try to find explanation between """ markers
+    exp_pattern = r'Exp:"""([\s\S]*?)"""'
+    exp_match = re.search(exp_pattern, text)
+    explanation = exp_match.group(1).strip() if exp_match else ""
+    
+    # Remove the explanation part from text to avoid confusion with code blocks
+    if exp_match:
+        text = text.replace(exp_match.group(0), "")
+    
+    # Extract code blocks
+    blocks = extract_code_blocks_with_language(text)
+    
+    # If no explicit explanation was found but there's text outside code blocks,
+    # treat it as the explanation
+    if not explanation:
+        # Get all code block positions
+        code_positions = []
+        for block in blocks:
+            start = text.find(block["original"])
+            if start != -1:
+                end = start + len(block["original"])
+                code_positions.append((start, end))
+        
+        # Sort positions
+        code_positions.sort()
+        
+        # Extract text that's not in code blocks
+        explanation_parts = []
+        last_end = 0
+        for start, end in code_positions:
+            if start > last_end:
+                part = text[last_end:start].strip()
+                if part:
+                    explanation_parts.append(part)
+            last_end = end
+        
+        # Get any remaining text after last code block
+        if last_end < len(text):
+            part = text[last_end:].strip()
+            if part:
+                explanation_parts.append(part)
+        
+        explanation = "\n".join(explanation_parts).strip()
+    
+    return {
+        "code_blocks": blocks,
+        "explanation": explanation
+    }
+
+def extract_code_blocks_with_language(text: str) -> List[Dict[str, str]]:
+    """Extract all code blocks from the text, including their language identifiers.
+    
+    Args:
+        text (str): The text containing code blocks
+        
+    Returns:
+        List[Dict[str, str]]: List of dictionaries containing:
+            - code: The extracted code
+            - language: The language identifier (if specified)
+            - original: The original code block including backticks
+    """
+    # Pattern to match code blocks with optional language identifier
+    code_pattern = r"```(\w+)?\n([\s\S]*?)```"
+    matches = re.finditer(code_pattern, text)
+    
+    blocks = []
+    for match in matches:
+        language = match.group(1) or "text"  # Default to "text" if no language specified
+        code = match.group(2).strip()
+        original = match.group(0)  # The complete code block including backticks
+        
+        blocks.append({
+            "code": code,
+            "language": language.lower(),
+            "original": original
+        })
+    
+    # If no code blocks found, try to extract code without backticks
+    if not blocks:
+        # Remove common markdown elements and explanations
         lines = text.split('\n')
         code_lines = []
         for line in lines:
-            # Skip lines that look like explanations or markdown
-            if line.strip().startswith(('#', '>', '-', '*')) or ':' in line[:20]:
-                continue
-            code_lines.append(line)
-        return '\n'.join(code_lines).strip()
+            if not line.strip().startswith(('#', '>', '-', '*')) and ':' not in line[:20]:
+                code_lines.append(line)
+        
+        if code_lines:
+            blocks.append({
+                "code": '\n'.join(code_lines).strip(),
+                "language": "text",
+                "original": text
+            })
+    
+    return blocks
+
+def extract_code_block(text: str) -> str:
+    """Extract only the code block from the response, removing any explanations.
+    
+    Note: This function is maintained for backward compatibility. For new code,
+    consider using extract_code_blocks_with_language() instead.
+    """
+    blocks = extract_code_blocks_with_language(text)
+    return blocks[0]["code"] if blocks else ""
 
 async def generate_code(prompt: str, language: str, model: str) -> str:
     max_retries = 3

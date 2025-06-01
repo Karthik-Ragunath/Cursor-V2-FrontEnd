@@ -1,14 +1,29 @@
 const API_BASE_URL = 'http://localhost:8000';
 
-interface CodeExecuteRequest {
+export interface CodeExecuteRequest {
   code: string;
   language: string;
   model?: string;
   prompt?: string;
 }
 
-interface CodeExecuteResponse {
+export interface CodeExecuteResponse {
   result: string;
+  error: string | null;
+  explanation?: string;
+}
+
+export interface CompareResponse {
+  results: Array<{
+    model: string;
+    code: string | null;
+    explanation: string | null;
+    cleanCode: string | null;
+    language: string;
+    prompt: string;
+    timestamp: string;
+    error: string | null;
+  }>;
   error: string | null;
 }
 

@@ -86,17 +86,26 @@ function App() {
         const newWs = new WebSocket('ws://localhost:8000/ws');
         ws = newWs;
         
+        let pongReceived = true;
+        
         newWs.onopen = () => {
           console.log('Connected to WebSocket');
           setWsError(null);
           reconnectAttempts = 0;
           
-          // Start ping interval
+          // Start ping interval with more frequent checks
           pingInterval = window.setInterval(() => {
             if (newWs?.readyState === WebSocket.OPEN) {
+              if (!pongReceived) {
+                // No pong received for previous ping, connection might be stale
+                console.warn('No pong received, connection might be stale. Reconnecting...');
+                newWs.close();
+                return;
+              }
+              pongReceived = false;
               newWs.send('ping');
             }
-          }, 30000); // Send ping every 30 seconds
+          }, 15000); // Send ping every 15 seconds
           
           // Request initial history
           newWs.send('get_history');
@@ -105,6 +114,7 @@ function App() {
         newWs.onmessage = (event) => {
           try {
             if (event.data === 'pong') {
+              pongReceived = true;
               return; // Ignore pong responses
             }
             
