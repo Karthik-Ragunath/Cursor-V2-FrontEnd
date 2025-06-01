@@ -42,9 +42,10 @@ interface SpeechRecognitionErrorEvent {
 }
 
 const Container = styled(Box)({
-  height: '100vh',
   display: 'flex',
   flexDirection: 'column',
+  height: '100%',
+  flex: 1,
   backgroundColor: '#1e1e1e',
   color: '#fff',
   '& .MuiInputBase-root': {
@@ -861,7 +862,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   </FormControl>
                 ))}
               </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
                 <StyledTextField
                   multiline
                   minRows={2}
@@ -886,11 +887,11 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                       disabled={isSubmitting}
                       sx={{
                         color: isListening ? '#ff6b6b' : '#9d9d9d',
-                        alignSelf: 'flex-start',
-                        mt: 1,
                         '&:hover': { color: isListening ? '#ff5252' : '#fff' },
                         '&.Mui-disabled': { color: '#4d4d4d' },
                         animation: isListening ? 'pulse 1.5s infinite' : 'none',
+                        minWidth: '48px',
+                        height: '48px',
                       }}
                     >
                       {isListening ? <StopIcon /> : <MicIcon />}
@@ -902,10 +903,10 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   disabled={isSubmitting}
                   sx={{
                     color: '#9d9d9d',
-                    alignSelf: 'flex-start',
-                    mt: 1,
                     '&:hover': { color: '#fff' },
                     '&.Mui-disabled': { color: '#4d4d4d' },
+                    minWidth: '48px',
+                    height: '48px',
                   }}
                 >
                   {isSubmitting ? <CircularProgress size={24} /> : <SendIcon />}
