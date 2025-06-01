@@ -447,7 +447,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [viewModes, setViewModes] = useState<('code' | 'preview')[]>(Array(count).fill('code'));
   const [previewUrls, setPreviewUrls] = useState<(string | null)[]>(Array(count).fill(null));
   const [explanations, setExplanations] = useState<string[]>(Array(count).fill(''));
-  const [editorInstances, setEditorInstances] = useState<any[]>([]);
+  const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   // Ensure firstDropdownValue is always a string
@@ -489,7 +489,6 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     }
 
     // Ensure view modes array matches the model count
-
     setViewModes(prev => {
       if (prev.length !== modelCount) {
         return Array(modelCount).fill('code');
@@ -506,9 +505,14 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   };
 
   const handleEditorDidMount = (editor: EditorMountParameters['editor'], monaco: EditorMountParameters['monaco'], index: number) => {
-    const newEditorInstances = [...editorInstances];
-    newEditorInstances[index] = editor;
-    setEditorInstances(newEditorInstances);
+    const model = selectedModels[index];
+    console.log(`Editor mounted for model: ${model} at index ${index}`);
+    
+    // Store editor instance with model name as key
+    const newEditorInstancesMap = new Map(editorInstancesMap);
+    newEditorInstancesMap.set(model, editor);
+    console.log('Editor instances after mount:', Array.from(newEditorInstancesMap.keys()));
+    setEditorInstancesMap(newEditorInstancesMap);
     
     editor.updateOptions({
       minimap: { enabled: true },
@@ -568,7 +572,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     e.stopPropagation();
     
     try {
-      const modelLabel = languageModels.find(model => model.value === selectedModels[index - 1])?.label || 'Unknown';
+      const modelLabel = languageModels.find(model => model.value === selectedModels[index])?.label || 'Unknown';
       const codeToImport = codes[index];
       
       if (!codeToImport) {
@@ -585,7 +589,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
           timestamp: new Date().toLocaleTimeString(),
           prompt: prompt,
           language: firstDropdownValue,
-          model: selectedModels[index - 1],
+          model: selectedModels[index],
           code: codeToImport,
           description: `Imported code from ${modelLabel}`
         }),
@@ -632,23 +636,51 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       if (data.results && Array.isArray(data.results)) {
         console.log('Processing results:', data.results);
         let errorOccurred = false;
-        data.results.forEach((result: CodeResult, index: number) => {
+
+        // Create a map of results by model
+        const resultsByModel = new Map<string, CodeResult>(
+          data.results.map((result: CodeResult) => [result.model, result])
+        );
+        console.log('Results by model:', resultsByModel);
+        console.log('Current editor instances:', Array.from(editorInstancesMap.keys()));
+        
+        // Process results in the same order as selectedModels
+        selectedModels.forEach((model, index) => {
+          if (!model) return; // Skip empty model slots
+          
+          const result = resultsByModel.get(model);
+          if (!result) {
+            errorOccurred = true;
+            console.error(`No result found for model ${model}`);
+            setError(`No result found for model ${model}`);
+            return;
+          }
+
           if (result.error) {
             errorOccurred = true;
             console.error(`Error for ${result.model}:`, result.error);
             setError(`Error for ${result.model}: ${result.error}`);
           } else if (result.code) {
-            console.log(`Processing code for ${result.model}`);
-            const extractedResult = extractCodeAndExplanation(result.code || '', firstDropdownValue);
-            onCodeChange(index + 1)(extractedResult.code);
+            console.log(`Processing code for ${result.model}:
+              - Model index: ${index}
+              - Editor instance available: ${!!editorInstancesMap.get(model)}
+              - Code length: ${result.code.length}`);
+
+            // Update the code for the correct editor index
+            onCodeChange(index)(result.code);
             
+            // Update explanations for the correct index
             const newExplanations = [...explanations];
-            newExplanations[index + 1] = extractedResult.explanation;
+            newExplanations[index] = ''; // Clear any previous explanation
             setExplanations(newExplanations);
             
-            if (editorInstances[index]) {
-              console.log(`Updating editor instance ${index} for ${result.model}`);
-              editorInstances[index].setValue(extractedResult.code);
+            // Update the editor instance using the model name
+            const editorInstance = editorInstancesMap.get(model);
+            if (editorInstance) {
+              console.log(`Updating editor instance for ${model}`);
+              editorInstance.setValue(result.code);
+            } else {
+              console.error(`No editor instance found for model: ${model}`);
             }
           }
         });
@@ -675,9 +707,8 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   // Update preview URLs and explanations when codes change
   useEffect(() => {
     const newPreviewUrls = codes.map((code, index) => {
-      if (viewModes[index - 1] === 'preview' && code) {
-        const { code: extractedCode } = extractCodeAndExplanation(code, firstDropdownValue);
-        return getPreviewContent(extractedCode, firstDropdownValue);
+      if (viewModes[index] === 'preview' && code) {
+        return getPreviewContent(code, firstDropdownValue);
       }
       return null;
     });
@@ -819,13 +850,13 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                       </ViewToggle>
                     )}
                     <Tooltip title="Import to Current Editor" placement="left">
-                      <ImportButton onClick={(e) => handleImportClick(e, index + 1)}>
+                      <ImportButton onClick={(e) => handleImportClick(e, index)}>
                         <KeyboardDoubleArrowLeftIcon />
                       </ImportButton>
                     </Tooltip>
                   </Box>
                 </EditorTitle>
-                {explanations[index + 1] && (
+                {explanations[index] && (
                   <Box sx={{ 
                     p: 2, 
                     backgroundColor: '#2d2d2d',
@@ -834,7 +865,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                     fontSize: '0.875rem',
                     whiteSpace: 'pre-wrap'
                   }}>
-                    {explanations[index + 1]}
+                    {explanations[index]}
                   </Box>
                 )}
                 <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -845,10 +876,11 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   )}
                   {viewModes[index] === 'code' ? (
                     <Editor
+                      key={`editor-${index}`}
                       height="100%"
                       defaultLanguage={firstDropdownValue}
-                      value={codes[index + 1] || ''}
-                      onChange={(value) => handleCodeChange(index + 1)(value)}
+                      value={codes[index] || ''}
+                      onChange={(value) => handleCodeChange(index)(value)}
                       onMount={(editor, monaco) => handleEditorDidMount(editor, monaco, index)}
                       theme="vs-dark"
                       options={{
@@ -859,9 +891,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         automaticLayout: true,
                       }}
                     />
-                  ) : previewUrls[index + 1] ? (
+                  ) : previewUrls[index] ? (
                     <PreviewFrame
-                      src={previewUrls[index+1] || ''}
+                      src={previewUrls[index] || ''}
                       title={`Preview ${index + 1}`}
                       sandbox="allow-scripts allow-same-origin"
                     />

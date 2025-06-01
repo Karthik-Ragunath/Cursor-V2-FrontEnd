@@ -61,11 +61,10 @@ def process_prompt(prompt_list: List[Dict[str, Any]], current_prompt: str, langu
 Important Instructions:
 1. ALWAYS review the previous code before generating new code
 2. Do not add any copyright notices or other legal notices to the code.  
-3. When adding elements / objects to the code, DO NOT add them on top of any text
-4. If the new request is related to or builds upon previous code, MODIFY the existing code instead of starting from scratch
-5. Maintain the structure and style of previous code while adding new features
-6. Add clear comments explaining your modifications
-7. If completely new code is needed, explain why previous code couldn't be reused
+3. If the new request is related to or builds upon previous code, MODIFY the existing code instead of starting from scratch
+4. Maintain the structure and style of previous code while adding new features
+5. Add clear comments explaining your modifications
+6. If completely new code is needed, explain why previous code couldn't be reused
 
 """
 
@@ -251,11 +250,11 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         headers=headers,
                         json={
                             "model": MODEL_ZOO[model],
-                            "max_tokens": 4000,
+                            "max_tokens": 2000,
                             "temperature": 0.1,
                             "system": full_prompt,
                             "messages": [
-                                {"role": "user", "content": "Generate ONLY the code. Do not add any explanations or comments outside the code block."}
+                                {"role": "user", "content": "Generate the code with explanations."}
                             ]
                         }
                     )
@@ -269,15 +268,8 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         
                     result = response.json()
                     logger.debug(f"Received response from Claude API for {model}")
-                    code = extract_code_block(result['content'][0]['text'].strip())
-                    
-                    # Verify we got valid code
-                    if not code or code.isspace():
-                        logger.warning(f"No valid code generated for {model} on attempt {retry_count + 1}")
-                        retry_count += 1
-                        continue
-                    
-                    return code
+                    # Return the complete response without filtering
+                    return result['content'][0]['text'].strip()
                 
                 elif model == 'deepseek':  # Deepseek model
                     headers = {
@@ -293,7 +285,7 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                             "model": MODEL_ZOO[model],
                             "messages": [
                                 {"role": "system", "content": full_prompt},
-                                {"role": "user", "content": "Generate ONLY the code. Do not add any explanations or comments outside the code block."}
+                                {"role": "user", "content": "Generate the code with explanations."}
                             ],
                             "temperature": 0.7,
                             "max_tokens": 4000
@@ -309,15 +301,8 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         
                     result = response.json()
                     logger.debug(f"Received response from Deepseek API")
-                    code = extract_code_block(result['choices'][0]['message']['content'].strip())
-                    
-                    # Verify we got valid code
-                    if not code or code.isspace():
-                        logger.warning(f"No valid code generated for {model} on attempt {retry_count + 1}")
-                        retry_count += 1
-                        continue
-                    
-                    return code
+                    # Return the complete response without filtering
+                    return result['choices'][0]['message']['content'].strip()
                     
                 else:
                     error_msg = f"Unsupported model: {model}"
@@ -384,6 +369,9 @@ async def compare_code(requests: List[CodeRequest]):
             if req.language.lower() not in supported_languages:
                 raise HTTPException(status_code=400, detail=f"Unsupported language: {req.language}")
 
+        # Create a dictionary to store results by model
+        results_by_model = {}
+
         async def execute_model_request(req: CodeRequest) -> Dict[str, Any]:
             try:
                 logger.debug(f"Processing request for model: {req.model}")
@@ -402,7 +390,7 @@ async def compare_code(requests: List[CodeRequest]):
                     logger.debug(f"Generating code for model {req.model}")
                     code = await generate_code(req.prompt, req.language, req.model)
                     logger.debug(f"Successfully generated code for model {req.model}")
-                    return {
+                    result = {
                         "model": req.model,
                         "language": req.language,
                         "code": code,
@@ -410,6 +398,9 @@ async def compare_code(requests: List[CodeRequest]):
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "error": None
                     }
+                    # Store result in dictionary with model as key
+                    results_by_model[req.model] = result
+                    return result
                 except HTTPException as e:
                     logger.error(f"HTTP error for model {req.model}: {e.detail}")
                     return {
@@ -440,24 +431,26 @@ async def compare_code(requests: List[CodeRequest]):
         
         # Process results and handle any exceptions
         processed_results = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Exception in results: {str(result)}")
-                processed_results.append({
-                    "model": "unknown",
-                    "language": "unknown",
-                    "code": None,
-                    "prompt": None,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "error": str(result)
-                })
-            else:
+        for req in requests:  # Iterate through original requests to maintain order
+            result = results_by_model.get(req.model)  # Get result for this model
+            if result:
                 logger.debug(f"Processing result for model: {result.get('model')}")
                 processed_results.append(result)
                 if not result.get("error"):
                     latest_responses.append(result)
                     if len(latest_responses) > 10:
                         latest_responses.pop(0)
+            else:
+                # Handle case where model didn't generate a result
+                logger.error(f"No result found for model: {req.model}")
+                processed_results.append({
+                    "model": req.model,
+                    "language": req.language,
+                    "code": None,
+                    "prompt": req.prompt,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": "Failed to generate code"
+                })
         
         logger.debug(f"Returning {len(processed_results)} processed results")
         return {
