@@ -1,0 +1,10 @@
+cd /home/ubuntu/github/Cursor-V2-FrontEnd/backend
+./start_manim_server.sh
+
+python test_manim_server.py
+
+cd /home/ubuntu/github/Cursor-V2-FrontEnd/backend
+python main.py
+
+cd /home/ubuntu/github/Cursor-V2-FrontEnd/frontend
+npm start
