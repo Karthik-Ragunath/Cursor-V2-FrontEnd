@@ -695,6 +695,10 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       const modelLabel = languageModels.find(model => model.value === selectedModels[index])?.label || 'Unknown';
       const codeToImport = codes[index + 1];
       
+      console.log('Import clicked for index:', index);
+      console.log('Code to import:', codeToImport?.substring(0, 100) + '...');
+      console.log('Current codes[0] before import:', codes[0]?.substring(0, 100) + '...');
+      
       if (!codeToImport) {
         console.error('No code to import');
         return;
@@ -715,8 +719,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         }),
       });
 
+      console.log('Calling onCodeChange(0) with code:', codeToImport?.substring(0, 100) + '...');
       onCodeChange(0)(codeToImport);
-      onEditorSelect(index);
+      console.log('Import completed successfully');
     } catch (error) {
       console.error('Error saving code history:', error);
     }

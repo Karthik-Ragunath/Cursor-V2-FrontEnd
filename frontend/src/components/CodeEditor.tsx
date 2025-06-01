@@ -73,7 +73,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
       <Box sx={{ flex: 1, overflow: 'hidden' }}>
         <Editor
           height="100%"
-          defaultLanguage={language}
+          language={language}
           value={value}
           onChange={onChange}
           theme="vs-dark"
