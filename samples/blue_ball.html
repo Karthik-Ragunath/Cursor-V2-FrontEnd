@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red and Blue Balls</title>
+    <style>
+        /* Styles for the balls */
+        .ball {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        /* Red ball specific styles */
+        .ball.red {
+            background-color: red;
+            left: 20px;
+        }
+        /* Blue ball specific styles */
+        .ball.blue {
+            background-color: blue;
+            right: 20px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Red and Blue Balls Demonstration</h1>
+    </header>
+
+    <main>
+        <!-- The red ball element -->
+        <div class="ball red" role="presentation" aria-hidden="true"></div>
+
+        <!-- New blue ball element -->
+        <div class="ball blue" role="presentation" aria-hidden="true"></div>
+
+        <section>
+            <h2>About this demonstration</h2>
+            <p>This page shows a red ball positioned to the left side of the screen and a blue ball positioned to the right side.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 Ball Demo</p>
+    </footer>
+</body>
+</html>

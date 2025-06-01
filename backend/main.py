@@ -1,23 +1,143 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Deque
 import os
 from dotenv import load_dotenv
+from datetime import datetime
+import httpx
+import asyncio
+import logging
+from collections import deque
+import json
+from uvicorn.logging import DefaultFormatter
+import pathlib
+from jinja2 import Environment, FileSystemLoader
 
 # Load environment variables
 load_dotenv()
 
+# Setup Jinja2 environment
+templates_dir = pathlib.Path(__file__).parent / 'templates'
+jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+
 app = FastAPI()
+
+# Global state
+active_connections: List[WebSocket] = []
+prompt_history: Deque[Dict[str, Any]] = deque(maxlen=10)
+latest_responses: List[Dict[str, Any]] = []
+frontend_info_cache: Dict[str, Any] = {}
+
+# Model mappings
+MODEL_ZOO = {
+    'claude-3.5': 'claude-3-sonnet-20240229',
+    'deepseek': 'deepseek-chat'
+}
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend dev server
+    allow_origins=[f"http://localhost:{os.getenv('FRONTEND_PORT')}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Get Uvicorn's logger
+logger = logging.getLogger("uvicorn")
+
+def process_prompt(prompt_list: List[Dict[str, Any]], current_prompt: str, language: str) -> str:
+    """Concatenate all the prompts as a conversation between the user and the model and pass it 
+    as context to the model."""
+    # Get the Jinja template for the language
+    try:
+        template = jinja_env.get_template(f"{language.lower()}.j2")
+        system_instructions = template.render(prompt=current_prompt) if template else ""
+    except:
+        system_instructions = f"""You are an expert {language} developer. 
+Important Instructions:
+1. ALWAYS review the previous code before generating new code
+2. Do not add any copyright notices or other legal notices to the code.  
+3. When adding elements / objects to the code, DO NOT add them on top of any text
+4. If the new request is related to or builds upon previous code, MODIFY the existing code instead of starting from scratch
+5. Maintain the structure and style of previous code while adding new features
+6. Add clear comments explaining your modifications
+7. If completely new code is needed, explain why previous code couldn't be reused
+
+"""
+
+    # Build conversation history
+    conversation = []
+    for entry in prompt_list:
+        conversation.extend([
+            f"User: {entry['prompt']}",
+            f"Assistant: Here's the generated code:\n```{language}\n{entry['code']}\n```\n"
+            f"This code {entry['description']}. Keep this in mind for future modifications."
+        ])
+
+    # Add the current prompt with explicit instruction
+    conversation.append(
+        f"User: {current_prompt}\n"
+        f"Important: If this request relates to previous code (like modifying colors, sizes, or adding features), "
+        f"please modify the most relevant previous code instead of starting from scratch. "
+        f"Explain your modifications in comments."
+    )
+
+    # Combine system instructions with conversation history
+    full_prompt = f"{system_instructions}\n\n"
+    full_prompt += "Previous conversation and code history (IMPORTANT - Review and modify this code when appropriate):\n"
+    full_prompt += "\n\n".join(conversation)
+    full_prompt += "\n\nPlease generate code based on this context. If the request builds upon previous code (like changing colors or adding features), modify the existing code and explain your changes in comments."
+
+    return full_prompt
+
+class PromptHistoryEntry(BaseModel):
+    timestamp: str
+    prompt: str
+    language: str
+    model: str
+    code: str
+    description: str
+
+async def broadcast_history():
+    """Broadcast current history to all connected clients."""
+    history_data = {
+        "type": "history_update",
+        "data": list(prompt_history)
+    }
+    for connection in active_connections:
+        try:
+            await connection.send_json(history_data)
+        except:
+            active_connections.remove(connection)
+
+async def log_prompt_history(entry: Dict[str, Any]):
+    """Add a new entry to the prompt history deque."""
+    prompt_history.append(entry)
+    await broadcast_history()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    active_connections.append(websocket)
+    try:
+        # Send initial history when client connects
+        await websocket.send_json({
+            "type": "history_update",
+            "data": list(prompt_history)
+        })
+        while True:
+            # Keep the connection alive and handle any incoming messages
+            data = await websocket.receive_text()
+            if data == "get_history":
+                await websocket.send_json({
+                    "type": "history_update",
+                    "data": list(prompt_history)
+                })
+    except:
+        if websocket in active_connections:
+            active_connections.remove(websocket)
 
 class CodeRequest(BaseModel):
     code: str
@@ -29,42 +149,340 @@ class CodeResponse(BaseModel):
     result: str
     error: Optional[str] = None
 
+class FrontendInfoRequest(BaseModel):
+    endpoint: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+class ComparisonCountRequest(BaseModel):
+    count: int
+
 @app.get("/")
 async def read_root():
     return {"status": "ok", "message": "Code Editor Backend API"}
 
-@app.post("/execute")
-async def execute_code(request: CodeRequest):
+@app.get("/responses")
+async def get_responses():
+    return {"responses": latest_responses}
+
+def get_system_prompt(language: str, prompt: str) -> str:
+    """Get the system prompt for the specified language using Jinja templates."""
     try:
-        if request.language not in ["html", "css", "javascript", "manim"]:
+        # Get the language-specific template
+        template = jinja_env.get_template(f"{language.lower()}.j2")
+        if template:
+            # Render the template with the user's prompt
+            return template.render(prompt=prompt if prompt else "")
+        else:
+            # Fallback for unsupported languages
+            return f"You are an expert {language} developer. Generate the code and add necessary comments and explanations as you see fit. User request: {prompt}"
+    except Exception as e:
+        logger.error(f"Error generating prompt for {language}: {str(e)}")
+        return f"You are an expert {language} developer. Generate the code and add necessary comments and explanations as you see fit. User request: {prompt}"
+
+async def generate_code(prompt: str, language: str, model: str) -> str:
+    try:
+        # Get conversation history and create full prompt
+        history_list = list(prompt_history)[-9:]  # Get last 9 entries to add current as 10th
+        full_prompt = process_prompt(history_list, prompt, language)
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if model == 'claude-3.5':
+                headers = {
+                    "x-api-key": os.getenv('ANTHROPIC_API_KEY'),
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                }
+                
+                response = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json={
+                        "model": MODEL_ZOO[model],
+                        "max_tokens": 4000,
+                        "temperature": 0.7,
+                        "system": full_prompt,
+                        "messages": [
+                            {"role": "user", "content": "Generate the code based on the context provided."}
+                        ]
+                    }
+                )
+                
+                if response.status_code != 200:
+                    error_msg = f"Claude API error: {response.text}"
+                    raise HTTPException(status_code=response.status_code, detail=error_msg)
+                    
+                result = response.json()
+                return result['content'][0]['text'].strip()
+            
+            elif model == 'deepseek':  # Deepseek model
+                headers = {
+                    "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = await client.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": MODEL_ZOO[model],
+                        "messages": [
+                            {"role": "system", "content": full_prompt},
+                            {"role": "user", "content": "Generate the code based on the context provided."}
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 4000
+                    }
+                )
+                
+                if response.status_code != 200:
+                    error_msg = f"Deepseek API error: {response.text}"
+                    raise HTTPException(status_code=response.status_code, detail=error_msg)
+                    
+                result = response.json()
+                return result['choices'][0]['message']['content'].strip()
+                
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported model: {model}")
+                
+    except Exception as e:
+        error_msg = f"API error: {str(e)}"
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/validate")
+async def validate_code(request: CodeRequest):
+    """
+    Sanity check endpoint to validate code and language before generation.
+    """
+    try:
+        supported_languages = ["html", "css", "javascript", "manim"]
+        if request.language.lower() not in supported_languages:
             raise HTTPException(status_code=400, detail="Unsupported language")
         
-        # Handle different languages
-        if request.language == "manim":
-            # TODO: Implement Manim execution
-            return {"result": "Manim execution not implemented yet", "error": None}
-        elif request.language == "javascript":
-            # TODO: Implement JavaScript execution
-            return {"result": "JavaScript execution not implemented yet", "error": None}
-        else:
-            # For HTML and CSS, we can return the code as-is
-            return {"result": request.code, "error": None}
+        return {
+            "result": request.code,
+            "error": None,
+            "message": "Code validation successful."
+        }
             
     except Exception as e:
+        logger.error(f"Error validating code: {str(e)}")
         return {"result": None, "error": str(e)}
+
+@app.post("/save-imported-code")
+async def save_imported_code(entry: PromptHistoryEntry):
+    """Save code that was imported to main editor."""
+    history_entry = {
+        "timestamp": entry.timestamp,
+        "prompt": entry.prompt,
+        "language": entry.language,
+        "model": entry.model,
+        "code": entry.code,
+        "description": f"Imported code from {entry.model}"
+    }
+    prompt_history.append(history_entry)
+    await broadcast_history()
+    return {"success": True}
 
 @app.post("/compare")
 async def compare_code(requests: List[CodeRequest]):
+    """Main endpoint for code generation."""
     try:
-        results = []
+        # Validate language for all requests
+        supported_languages = ["html", "css", "javascript", "manim"]
         for req in requests:
-            # TODO: Implement actual model-based code generation
-            # For now, just echo back the request
-            results.append({
-                "model": req.model,
-                "code": req.code,
-                "prompt": req.prompt
-            })
-        return {"results": results, "error": None}
+            if req.language.lower() not in supported_languages:
+                raise HTTPException(status_code=400, detail=f"Unsupported language: {req.language}")
+
+        async def execute_model_request(req: CodeRequest) -> Dict[str, Any]:
+            try:
+                if not req.model or not req.prompt:
+                    return {
+                        "model": req.model,
+                        "language": req.language,
+                        "code": req.code,
+                        "prompt": req.prompt,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "error": None
+                    }
+                
+                code = await generate_code(req.prompt, req.language, req.model)
+                return {
+                    "model": req.model,
+                    "language": req.language,
+                    "code": code,
+                    "prompt": req.prompt,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": None
+                }
+            except Exception as e:
+                return {
+                    "model": req.model,
+                    "language": req.language,
+                    "code": None,
+                    "prompt": req.prompt,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": str(e)
+                }
+
+        # Execute all requests in parallel
+        tasks = [execute_model_request(req) for req in requests]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+        
+        # Update response history
+        for result in results:
+            if not result.get("error"):
+                latest_responses.append(result)
+                if len(latest_responses) > 10:
+                    latest_responses.pop(0)
+        
+        return {
+            "results": results,
+            "error": None
+        }
+            
     except Exception as e:
-        return {"results": None, "error": str(e)} 
+        return {"results": None, "error": str(e)}
+
+@app.get("/frontend-info")
+async def get_frontend_info():
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.get(f"http://localhost:{os.getenv('FRONTEND_PORT')}")
+                
+                frontend_data = {
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "content_preview": response.text[:500] + "..." if len(response.text) > 500 else response.text,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                frontend_info_cache["latest"] = frontend_data
+                return {
+                    "success": True,
+                    "data": frontend_data
+                }
+                
+            except httpx.ConnectError:
+                return {
+                    "success": False,
+                    "error": f"Could not connect to frontend on localhost:{os.getenv('FRONTEND_PORT')}. Is it running?"
+                }
+                
+    except Exception as e:
+        error_msg = f"Error fetching frontend info: {str(e)}"
+        logger.error(error_msg)
+        return {
+            "success": False,
+            "error": error_msg
+        }
+
+@app.post("/frontend-info")
+async def post_frontend_info(request: FrontendInfoRequest):
+    try:
+        endpoint = request.endpoint or ""
+        base_url = f"http://localhost:{os.getenv('FRONTEND_PORT')}{endpoint}"
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                if request.data:
+                    response = await client.post(base_url, json=request.data)
+                else:
+                    response = await client.get(base_url)
+                
+                result_data = {
+                    "url": base_url,
+                    "method": "POST" if request.data else "GET",
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "content": response.text,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                return {
+                    "success": True,
+                    "data": result_data
+                }
+                
+            except httpx.ConnectError:
+                return {
+                    "success": False,
+                    "error": f"Could not connect to {base_url}. Is the frontend running on port {os.getenv('FRONTEND_PORT')}?"
+                }
+                
+    except Exception as e:
+        error_msg = f"Error interacting with frontend: {str(e)}"
+        logger.error(error_msg)
+        return {
+            "success": False,
+            "error": error_msg
+        }
+
+@app.get("/print-frontend-status")
+async def print_frontend_status():
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            try:
+                response = await client.get(f"http://localhost:{os.getenv('FRONTEND_PORT')}")   
+                
+                content_lower = response.text.lower()
+                app_type = "Frontend Framework Application" if any(framework in content_lower for framework in ['react', 'vue', 'angular', 'svelte']) else "Vite Development Server" if 'vite' in content_lower else "HTML Application" if '<html' in content_lower else "Unknown"
+                
+                return {
+                    "status": "online",
+                    "status_code": response.status_code,
+                    "response_time": response.elapsed.total_seconds(),
+                    "content_length": len(response.text),
+                    "app_type": app_type,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+            except httpx.ConnectError:
+                return {
+                    "status": "offline",
+                    "error": "Connection refused",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+    except Exception as e:
+        error_msg = f"Error checking frontend status: {str(e)}"
+        return {
+            "status": "error",
+            "error": error_msg,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+@app.get("/debug/latest")
+async def get_latest():
+    return {
+        "count": len(latest_responses),
+        "responses": latest_responses
+    }
+
+@app.get("/debug/frontend-cache")
+async def get_frontend_cache():
+    return {
+        "cache": frontend_info_cache
+    }
+
+@app.post("/notify-comparison-count")
+async def notify_comparison_count(request: ComparisonCountRequest):
+    try:
+        count_message = "No comparisons" if request.count == 0 else f"{request.count} model comparison{'s' if request.count > 1 else ''}"
+        logger.info(f"Comparison mode changed to: {count_message}")
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error handling comparison count: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/prompt-history")
+async def get_prompt_history():
+    """Get the current prompt history."""
+    return {"history": list(prompt_history)}
+
+@app.post("/clear-history")
+async def clear_prompt_history():
+    """Clear the prompt history."""
+    prompt_history.clear()
+    await broadcast_history()
+    return {"message": "History cleared"}

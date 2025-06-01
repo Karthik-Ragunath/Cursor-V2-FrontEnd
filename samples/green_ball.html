@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triangle of Colored Balls</title>
+    <style>
+        /* Styles for the balls */
+        .ball {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            position: absolute;
+        }
+        /* Red ball specific styles */
+        .ball.red {
+            background-color: red;
+            left: 20%;
+            top: 20%;
+        }
+        /* Blue ball specific styles */
+        .ball.blue {
+            background-color: blue;
+            right: 20%;
+            top: 20%;
+        }
+        /* New green ball specific styles */
+        .ball.green {
+            background-color: green;
+            left: 50%;
+            bottom: 20%;
+            transform: translateX(-50%);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Triangle of Colored Balls Demonstration</h1>
+    </header>
+
+    <main>
+        <!-- The red ball element -->
+        <div class="ball red" role="presentation" aria-hidden="true"></div>
+
+        <!-- The blue ball element -->
+        <div class="ball blue" role="presentation" aria-hidden="true"></div>
+
+        <!-- New green ball element -->
+        <div class="ball green" role="presentation" aria-hidden="true"></div>
+
+        <section>
+            <h2>About this demonstration</h2>
+            <p>This page shows three colored balls (red, blue, and green) positioned to form a triangle on the screen.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 Ball Demo</p>
+    </footer>
+</body>
+</html>
