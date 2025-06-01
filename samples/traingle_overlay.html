@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triangle of Colored Balls with Outline</title>
+    <style>
+        /* Styles for the balls */
+        .ball {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            position: absolute;
+        }
+        .ball.red {
+            background-color: red;
+            left: 20%;
+            top: 20%;
+        }
+        .ball.blue {
+            background-color: blue;
+            right: 20%;
+            top: 20%;
+        }
+        .ball.green {
+            background-color: green;
+            left: 50%;
+            bottom: 20%;
+            transform: translateX(-50%);
+        }
+        /* New styles for the triangle outline */
+        .triangle-outline {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Triangle of Colored Balls with Outline Demonstration</h1>
+    </header>
+
+    <main>
+        <!-- The red ball element -->
+        <div class="ball red" role="presentation" aria-hidden="true"></div>
+
+        <!-- The blue ball element -->
+        <div class="ball blue" role="presentation" aria-hidden="true"></div>
+
+        <!-- The green ball element -->
+        <div class="ball green" role="presentation" aria-hidden="true"></div>
+
+        <!-- New SVG element for the triangle outline -->
+        <svg class="triangle-outline" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <polygon points="20,20 80,20 50,80" fill="none" stroke="black" stroke-width="2"/>
+        </svg>
+
+        <section>
+            <h2>About this demonstration</h2>
+            <p>This page shows three colored balls (red, blue, and green) positioned to form a triangle on the screen, with a black outline forming a triangle around them.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 Ball Demo</p>
+    </footer>
+</body>
+</html>
