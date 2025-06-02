@@ -15,6 +15,9 @@ import {
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
 import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
+import claudeIcon from '../assets/claude.svg';
+import deepseekIcon from '../assets/deepseek.svg';
+import manimIcon from '../assets/manim.svg';
 
 // TypeScript declarations for Speech Recognition
 declare global {
@@ -167,6 +170,8 @@ const PromptContainer = styled(Box)(({ theme }) => ({
   display: 'flex',
   gap: theme.spacing(1),
   alignItems: 'flex-start',
+  background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+  backdropFilter: 'blur(10px)',
 }));
 
 const StyledTextField = styled(TextField)(({ theme }) => ({
@@ -176,13 +181,26 @@ const StyledTextField = styled(TextField)(({ theme }) => ({
     fontSize: '0.875rem',
     fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    transition: 'all 0.3s ease',
   },
   '& .MuiOutlinedInput-root': {
     '& fieldset': {
-      borderColor: '#4d4d4d',
+      borderColor: 'rgba(96, 239, 255, 0.1)',
+      transition: 'border-color 0.3s ease',
     },
     '&:hover fieldset': {
-      borderColor: '#6d6d6d',
+      borderColor: 'rgba(0, 255, 135, 0.2)',
+    },
+    '&.Mui-focused fieldset': {
+      borderColor: 'rgba(96, 239, 255, 0.3)',
+      borderWidth: '2px',
+      boxShadow: '0 0 10px rgba(96, 239, 255, 0.1)',
+    },
+  },
+  '& .MuiInputBase-input': {
+    '&::placeholder': {
+      color: 'rgba(255, 255, 255, 0.5)',
+      opacity: 1,
     },
   },
 }));
@@ -223,10 +241,25 @@ const ViewToggle = styled(ToggleButtonGroup)(({ theme }) => ({
   },
 }));
 
+const ModelIcon = styled('img')({
+  width: '24px',
+  height: '24px',
+  marginRight: '8px',
+  borderRadius: '4px',
+  filter: 'drop-shadow(0 0 4px rgba(96, 239, 255, 0.3))',
+});
+
+const haikuIcon = claudeIcon; 
 const languageModels = [
-  { value: 'claude-3.5', label: 'Claude-3.5' },
-  { value: 'claude-3-haiku', label: 'Claude-3 Haiku' },
-  { value: 'deepseek', label: 'Deepseek Coder' }
+  { value: 'claude-3.5', label: 'Claude-3.5', icon: claudeIcon },
+  { value: 'claude-3-haiku', label: 'Claude-3 Haiku', icon: haikuIcon },
+  { value: 'deepseek', label: 'Deepseek Coder', icon: deepseekIcon }
+];
+
+const manimModels = [
+  { value: 'Main Finetuned', label: 'Manim Finetuned', icon: manimIcon },
+  { value: 'Deepseek', label: 'Deepseek-Coder', icon: deepseekIcon },
+  { value: 'Claude', label: 'Claude-3.5', icon: claudeIcon }
 ];
 
 interface CodeResult {
@@ -577,23 +610,21 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     console.log('Setting up models for count:', modelCount, 'language:', firstDropdownValue);
     
     // Define model sets based on language
-    const manimModels = ['Main Finetuned', 'Deepseek', 'Claude'];
-    const defaultModels = ['claude-3.5', 'claude-3-haiku', 'deepseek'];
-    const availableModels = firstDropdownValue === 'manim' ? manimModels : defaultModels;
+    const availableModels = firstDropdownValue === 'manim' ? manimModels : languageModels;
     
     if (modelCount === 1) {
-      const newModels = [availableModels[0]];
+      const newModels = [availableModels[0].value];
       console.log('Setting up 1 model:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(1).fill('code'));
     } else if (modelCount === 2) {
       // Set both models by default
-      const newModels = [availableModels[0], availableModels[1]];
+      const newModels = [availableModels[0].value, availableModels[1].value];
       console.log('Setting up 2 models:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(2).fill('code'));
     } else if (modelCount === 3) {
-      const newModels = [availableModels[0], availableModels[1], availableModels[2]];
+      const newModels = [availableModels[0].value, availableModels[1].value, availableModels[2].value];
       console.log('Setting up 3 models:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(3).fill('code'));
@@ -895,34 +926,90 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
 
   return (
     <Container>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Box component="div" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {secondRadioValue !== 'none' && (
           <>
-            <Box sx={{ p: 2, backgroundColor: '#2d2d2d', borderBottom: '1px solid #3d3d3d' }}>
-              <Box sx={{ 
+            <Box component="div" sx={{ 
+              p: 2, 
+              backgroundColor: '#2d2d2d', 
+              borderBottom: '1px solid #3d3d3d',
+              background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+              backdropFilter: 'blur(10px)',
+            }}>
+              <Box component="div" sx={{ 
                 display: 'flex', 
                 gap: 2, 
                 mb: 2,
-                flexWrap: 'wrap', // Allow wrapping for small screens
+                flexWrap: 'wrap',
                 justifyContent: 'flex-start' 
               }}>
                 {Array.from({ length: parseInt(secondRadioValue) }).map((_, index) => (
                   <FormControl key={index} size="small" sx={{ minWidth: 180, flex: '1 1 auto' }}>
-                    <InputLabel sx={{ color: 'white' }}>Model {index + 1}</InputLabel>
+                    <InputLabel sx={{ 
+                      color: 'white',
+                      '&.Mui-focused': {
+                        background: 'linear-gradient(90deg, #00ff87 0%, #60efff 100%)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                      }
+                    }}>Model {index + 1}</InputLabel>
                     <Select
                       value={selectedModels[index] || ''}
                       onChange={handleModelChange(index)}
                       sx={{ 
                         color: 'white',
-                        maxWidth: '100%'
+                        maxWidth: '100%',
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(96, 239, 255, 0.1)',
+                        },
+                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(0, 255, 135, 0.2)',
+                        },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(96, 239, 255, 0.3)',
+                          borderWidth: '2px',
+                          boxShadow: '0 0 10px rgba(96, 239, 255, 0.1)',
+                        }
+                      }}
+                      MenuProps={{
+                        PaperProps: {
+                          sx: {
+                            backgroundColor: '#2d2d2d',
+                            backgroundImage: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+                            backdropFilter: 'blur(10px)',
+                            '& .MuiMenuItem-root': {
+                              color: 'white',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '8px 16px',
+                              '&:hover': {
+                                background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                              },
+                              '&.Mui-selected': {
+                                background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                                '&:hover': {
+                                  background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.3) 0%, rgba(96, 239, 255, 0.3) 100%)',
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }}
+                      renderValue={(selected) => {
+                        const model = (firstDropdownValue === 'manim' ? manimModels : languageModels)
+                          .find(m => m.value === selected);
+                        return (
+                          <Box component="div" sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {model && <ModelIcon src={model.icon} alt={model.label} />}
+                            <span>{model?.label || 'Select Model'}</span>
+                          </Box>
+                        );
                       }}
                     >
-                      {(firstDropdownValue === 'manim' ? [
-                        { value: 'Main Finetuned', label: 'Manim Finetuned' },
-                        { value: 'Deepseek', label: 'Deepseek-Coder' },
-                        { value: 'Claude', label: 'Claude-3.5' }
-                      ] : languageModels).map((model) => (
+                      {(firstDropdownValue === 'manim' ? manimModels : languageModels).map((model) => (
                         <MenuItem key={model.value} value={model.value}>
+                          <ModelIcon src={model.icon} alt={model.label} />
                           {model.label}
                         </MenuItem>
                       ))}
@@ -955,9 +1042,15 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         onClick={() => setVoiceMode(voiceMode === 'replace' ? 'append' : 'replace')}
                         sx={{
                           color: voiceMode === 'replace' ? '#4CAF50' : '#FF9800',
-                          '&:hover': { color: voiceMode === 'replace' ? '#45a049' : '#e68900' },
+                          background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                          border: '1px solid rgba(96, 239, 255, 0.2)',
+                          '&:hover': { 
+                            color: voiceMode === 'replace' ? '#45a049' : '#e68900',
+                            background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                          },
                           minWidth: '48px',
                           height: '48px',
+                          borderRadius: '8px',
                         }}
                       >
                         <SwapHorizIcon />
@@ -969,11 +1062,20 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         disabled={isSubmitting}
                         sx={{
                           color: isListening ? '#ff6b6b' : '#9d9d9d',
-                          '&:hover': { color: isListening ? '#ff5252' : '#fff' },
-                          '&.Mui-disabled': { color: '#4d4d4d' },
+                          background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                          border: '1px solid rgba(96, 239, 255, 0.2)',
+                          '&:hover': { 
+                            color: isListening ? '#ff5252' : '#fff',
+                            background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                          },
+                          '&.Mui-disabled': { 
+                            color: '#4d4d4d',
+                            background: 'rgba(45, 45, 45, 0.5)',
+                          },
                           animation: isListening ? 'pulse 1.5s infinite' : 'none',
                           minWidth: '48px',
                           height: '48px',
+                          borderRadius: '8px',
                         }}
                       >
                         {isListening ? <StopIcon /> : <MicIcon />}
@@ -986,17 +1088,26 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   disabled={isSubmitting}
                   sx={{
                     color: '#9d9d9d',
-                    '&:hover': { color: '#fff' },
-                    '&.Mui-disabled': { color: '#4d4d4d' },
+                    background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                    border: '1px solid rgba(96, 239, 255, 0.2)',
+                    '&:hover': { 
+                      color: '#fff',
+                      background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                    },
+                    '&.Mui-disabled': { 
+                      color: '#4d4d4d',
+                      background: 'rgba(45, 45, 45, 0.5)',
+                    },
                     minWidth: '48px',
                     height: '48px',
+                    borderRadius: '8px',
                   }}
                 >
                   {isSubmitting ? <CircularProgress size={24} /> : <SendIcon />}
                 </IconButton>
               </Box>
               {error && (
-                <Box sx={{ 
+                <Box component="div" sx={{ 
                   mt: 1,
                   p: 1,
                   backgroundColor: 'rgba(255, 0, 0, 0.1)',
