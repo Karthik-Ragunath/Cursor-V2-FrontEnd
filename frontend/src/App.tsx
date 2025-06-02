@@ -212,9 +212,19 @@ function App() {
   }, [secondRadioValue, firstDropdownValue]);
 
   const handleCodeChange = (index: number) => (newValue: string | undefined) => {
-    const newCodes = [...codes];
-    newCodes[index] = newValue || '';
-    setCodes(newCodes);
+    console.log(`App.handleCodeChange called for index ${index}:`, newValue ? `${newValue.length} characters` : 'EMPTY/UNDEFINED');
+    console.log(`App.handleCodeChange code preview for index ${index}:`, newValue?.substring(0, 100) + '...');
+    
+    setCodes(prevCodes => {
+      console.log('App.codes array before update:', prevCodes.map((code, i) => `codes[${i}]: ${code ? code.substring(0, 50) + '...' : 'EMPTY'}`));
+      
+      const newCodes = [...prevCodes];
+      newCodes[index] = newValue || '';
+      console.log(`App.updating codes[${index}] with:`, newValue ? `${newValue.length} characters` : 'EMPTY STRING');
+      
+      console.log('App.codes array after update:', newCodes.map((code, i) => `codes[${i}]: ${code ? code.substring(0, 50) + '...' : 'EMPTY'}`));
+      return newCodes;
+    });
   };
 
   const handleEditorSelect = (index: number) => {

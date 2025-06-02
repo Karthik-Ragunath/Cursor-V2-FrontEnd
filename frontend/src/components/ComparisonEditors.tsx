@@ -45,10 +45,11 @@ interface SpeechRecognitionErrorEvent {
 const Container = styled(Box)({
   display: 'flex',
   flexDirection: 'column',
-  height: '100%',
+  height: '100vh', // Full viewport height
   flex: 1,
   backgroundColor: '#1e1e1e',
   color: '#fff',
+  overflow: 'hidden', // Prevent main container from scrolling
   '& .MuiInputBase-root': {
     color: '#fff',
   },
@@ -91,8 +92,12 @@ const EditorsContainer = styled(Box)({
   gap: '4px',
   overflow: 'hidden',
   padding: '4px',
+  minHeight: '0', // Important for flex children
+  height: '100%', // Ensure full height
   '& > *': {
     flex: '1 1 0',
+    minWidth: '0', // Prevent flex items from overflowing
+    minHeight: '0', // Important for flex children
   }
 });
 
@@ -104,13 +109,14 @@ const EditorWrapper = styled(Box)({
   flexDirection: 'column',
   backgroundColor: '#1e1e1e',
   minWidth: '150px',
-  overflow: 'hidden',
+  overflow: 'hidden', // Changed back to hidden for wrapper
 });
 
 const EditorContainer = styled(Box)({
   flex: 1,
   position: 'relative',
-  overflow: 'hidden',
+  overflow: 'hidden', // Monaco editor handles its own scrolling
+  minHeight: '0', // Important for flex children to shrink
   '& .monaco-editor': {
     height: '100% !important',
     width: '100% !important',
@@ -274,122 +280,124 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
   let explanation = '';
   let codeContent = '';
 
-  // First try to extract code from code blocks
-  const codeBlockRegex = new RegExp(`\`\`\`(?:${language})?\\s*\\n?([\\s\\S]*?)\\n?\`\`\``, 'gi');
-  const matches = text.matchAll(codeBlockRegex);
+  // First, try to extract from the new format: ```code and ```exp blocks
+  const codeBlockRegex = /```code\s*\n?([\s\S]*?)```/gi;
+  const expBlockRegex = /```exp\s*\n?([\s\S]*?)```/gi;
+  
+  const codeMatch = codeBlockRegex.exec(text);
+  const expMatch = expBlockRegex.exec(text);
+  
+  if (codeMatch && codeMatch[1]) {
+    // Found new format with ```code block
+    codeContent = codeMatch[1].trim();
+    
+    if (expMatch && expMatch[1]) {
+      // Found explanation block
+      explanation = expMatch[1].trim();
+    }
+    
+    return {
+      code: codeContent,
+      explanation: explanation
+    };
+  }
+
+  // Fallback to standard code blocks (```html, ```css, ```javascript, etc.)
+  const standardCodeBlockRegex = new RegExp(`\`\`\`(?:${language})?\\s*\\n?([\\s\\S]*?)\\n?\`\`\``, 'gi');
+  const matches = text.matchAll(standardCodeBlockRegex);
   const codeBlocks = Array.from(matches);
   
   if (codeBlocks.length > 0) {
-    // Get any text before the first code block as explanation
-    explanation = text.substring(0, text.indexOf('```'))
-      .split('\n')
-      .filter(line => line.trim())
-      .join('\n');
-    
     // Combine all code blocks, ensuring match[1] exists
     codeContent = codeBlocks
       .map(match => (match && match[1] ? match[1].trim() : ''))
       .filter(Boolean)
       .join('\n\n');
-  } else {
-    // If no code blocks found, try to extract based on language syntax
-    const lines = text.split('\n');
-    const codeLines: string[] = [];
-    const explanationLines: string[] = [];
-    let isInCode = false;
-
-    for (let line of lines) {
-      const trimmedLine = line.trim();
-      
-      // Skip empty lines
-      if (!trimmedLine) continue;
-
-      // Check if line looks like code based on language
-      const isCodeLine = (
-        language === 'html' ? (
-          trimmedLine.startsWith('<') || 
-          trimmedLine.startsWith('</') ||
-          trimmedLine.endsWith('>') ||
-          trimmedLine.includes('/>') ||
-          /^[\s]*[<{\w]/.test(trimmedLine)
-        ) :
-        language === 'css' ? (
-          trimmedLine.includes('{') ||
-          trimmedLine.includes('}') ||
-          trimmedLine.includes(':') ||
-          /^[\s]*[\w\-#.[]/.test(trimmedLine)
-        ) :
-        language === 'javascript' ? (
-          trimmedLine.includes('function') ||
-          trimmedLine.includes('=>') ||
-          trimmedLine.includes('var ') ||
-          trimmedLine.includes('let ') ||
-          trimmedLine.includes('const ') ||
-          trimmedLine.includes('class ') ||
-          trimmedLine.includes('return ') ||
-          trimmedLine.includes('if ') ||
-          trimmedLine.includes('else ') ||
-          trimmedLine.includes('for ') ||
-          trimmedLine.includes('while ') ||
-          /^[\s]*[\w$_]/.test(trimmedLine) ||
-          /^[\s]*[{}\[\]();]/.test(trimmedLine)
-        ) :
-        // For other languages, assume it's code if it's not clearly a comment or text
-        /^[\s]*[\w$_({[<]/.test(trimmedLine)
-      );
-
-      // Handle code comments
-      const isComment = (
-        trimmedLine.startsWith('//') || 
-        trimmedLine.startsWith('/*') || 
-        trimmedLine.startsWith('*') ||
-        (language === 'html' && trimmedLine.startsWith('<!--'))
-      );
-
-      if (isCodeLine) {
-        isInCode = true;
-        codeLines.push(line);
-      } else if (isComment && isInCode) {
-        // Only keep comments that are within code blocks
-        codeLines.push(line);
-      } else if (!isComment && !isCodeLine && trimmedLine) {
-        // If it's not code and not a comment, it's explanation text
-        explanationLines.push(trimmedLine);
-      }
-    }
-
-    codeContent = codeLines.join('\n').trim();
-    explanation = explanationLines.join('\n').trim();
+    
+    // Everything else is explanation (but we'll ignore it for the editor)
+    return {
+      code: codeContent,
+      explanation: '' // Don't show explanations in the UI
+    };
   }
 
-  // Clean up the code to remove any non-code content
-  codeContent = codeContent
-    .split('\n')
-    .filter(line => {
-      const trimmed = line.trim();
-      // Keep only code and code comments that are part of the code
-      return trimmed && (
-        /^[\s]*[a-zA-Z0-9_$({[<]/.test(trimmed) || // Code lines
-        (trimmed.startsWith('//') && /^\/\/\s*[@\w]/.test(trimmed)) || // JSDoc and meaningful comments
-        (trimmed.startsWith('/*') && /^\/\*\s*[@\w]/.test(trimmed)) || // Multi-line JSDoc start
-        (trimmed.startsWith('*') && /^\*\s*[@\w]/.test(trimmed)) || // Multi-line JSDoc middle
-        (trimmed.startsWith('*/') && /^\*\/\s*$/.test(trimmed)) || // Multi-line comments end
-        (language === 'html' && trimmed.startsWith('<!--') && /<!--\s*[@\w]/.test(trimmed)) // HTML comments
-      );
-    })
-    .join('\n')
-    .trim();
+  // If no proper code blocks found, try to detect HTML/CSS/JS patterns and extract only those
+  const lines = text.split('\n');
+  const codeLines: string[] = [];
+  let inCodeSection = false;
+
+  for (let line of lines) {
+    const trimmedLine = line.trim();
+    
+    // Skip empty lines
+    if (!trimmedLine) continue;
+
+    // Skip obvious explanation lines
+    if (
+      trimmedLine.toLowerCase().includes('here\'s how') ||
+      trimmedLine.toLowerCase().includes('the code works') ||
+      trimmedLine.toLowerCase().includes('document structure') ||
+      trimmedLine.toLowerCase().includes('css styling') ||
+      trimmedLine.toLowerCase().includes('accessibility features') ||
+      trimmedLine.toLowerCase().includes('the result is') ||
+      trimmedLine.match(/^\d+\.\s/) || // Numbered lists
+      trimmedLine.startsWith('- ') && !trimmedLine.includes(':') // Simple bullet points without CSS properties
+    ) {
+      continue;
+    }
+
+    // Check if line looks like actual code
+    const isCodeLine = (
+      language === 'html' ? (
+        trimmedLine.startsWith('<') || 
+        trimmedLine.startsWith('</') ||
+        trimmedLine.endsWith('>') ||
+        trimmedLine.includes('/>') ||
+        trimmedLine.startsWith('<!DOCTYPE') ||
+        /^[\s]*[<{\w]/.test(trimmedLine)
+      ) :
+      language === 'css' ? (
+        trimmedLine.includes('{') ||
+        trimmedLine.includes('}') ||
+        trimmedLine.includes(':') && trimmedLine.includes(';') ||
+        /^[\s]*[\w\-#.[]/.test(trimmedLine)
+      ) :
+      language === 'javascript' ? (
+        trimmedLine.includes('function') ||
+        trimmedLine.includes('=>') ||
+        trimmedLine.includes('var ') ||
+        trimmedLine.includes('let ') ||
+        trimmedLine.includes('const ') ||
+        trimmedLine.includes('class ') ||
+        trimmedLine.includes('return ') ||
+        trimmedLine.includes('console.log') ||
+        /^[\s]*[\w$_].*[;{}()]/.test(trimmedLine)
+      ) :
+      // For other languages, be more selective
+      /^[\s]*[<>{}[\]();]/.test(trimmedLine) && !trimmedLine.includes('explanation')
+    );
+
+    if (isCodeLine) {
+      inCodeSection = true;
+      codeLines.push(line);
+    } else if (inCodeSection && trimmedLine.startsWith('//')) {
+      // Include code comments only if we're already in a code section
+      codeLines.push(line);
+    }
+  }
+
+  codeContent = codeLines.join('\n').trim();
 
   return {
     code: codeContent,
-    explanation
+    explanation: '' // Don't show explanations in the UI
   };
 };
 
 const getPreviewContent = (code: string, language: string): string => {
   if (!code) return '';
   
-  // Clean the code to ensure only code is displayed
+  // Extract only the code portion, ignore explanations
   const { code: extractedCode } = extractCodeAndExplanation(code, language);
   console.log("Extracted code:", extractedCode);
   switch (language.toLowerCase()) {
@@ -566,7 +574,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     const modelCount = parseInt(secondRadioValue);
     
     // Set up default models based on comparison mode and language
-    console.log('Model count:', modelCount);
+    console.log('Setting up models for count:', modelCount, 'language:', firstDropdownValue);
     
     // Define model sets based on language
     const manimModels = ['Main Finetuned', 'Deepseek', 'Claude'];
@@ -574,20 +582,27 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     const availableModels = firstDropdownValue === 'manim' ? manimModels : defaultModels;
     
     if (modelCount === 1) {
-      setSelectedModels([availableModels[0]]);
+      const newModels = [availableModels[0]];
+      console.log('Setting up 1 model:', newModels);
+      setSelectedModels(newModels);
       setViewModes(Array(1).fill('code'));
     } else if (modelCount === 2) {
       // Set both models by default
-      setSelectedModels([availableModels[0], availableModels[1]]);
+      const newModels = [availableModels[0], availableModels[1]];
+      console.log('Setting up 2 models:', newModels);
+      setSelectedModels(newModels);
       setViewModes(Array(2).fill('code'));
     } else if (modelCount === 3) {
-      setSelectedModels([availableModels[0], availableModels[1], availableModels[2]]);
+      const newModels = [availableModels[0], availableModels[1], availableModels[2]];
+      console.log('Setting up 3 models:', newModels);
+      setSelectedModels(newModels);
       setViewModes(Array(3).fill('code'));
     }
 
     // Ensure view modes array matches the model count
     setViewModes(prev => {
       if (prev.length !== modelCount) {
+        console.log('Adjusting view modes from', prev.length, 'to', modelCount);
         return Array(modelCount).fill('code');
       }
       return prev;
@@ -601,15 +616,23 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     console.log('Models updated:', newModels); // Debug log
   };
 
-  const handleEditorDidMount = (editor: EditorMountParameters['editor'], monaco: EditorMountParameters['monaco'], index: number) => {
+  const handleEditorDidMount = (editor: any, monaco: any, index: number) => {
     const model = selectedModels[index];
     console.log(`Editor mounted for model: ${model} at index ${index}`);
+    console.log('All selected models:', selectedModels);
+    
+    if (!model) {
+      console.warn(`No model selected for index ${index}`);
+      return;
+    }
     
     // Store editor instance with model name as key
-    const newEditorInstancesMap = new Map(editorInstancesMap);
-    newEditorInstancesMap.set(model, editor);
-    console.log('Editor instances after mount:', Array.from(newEditorInstancesMap.keys()));
-    setEditorInstancesMap(newEditorInstancesMap);
+    setEditorInstancesMap(prev => {
+      const newMap = new Map(prev);
+      newMap.set(model, editor);
+      console.log('Editor instances after mount:', Array.from(newMap.keys()));
+      return newMap;
+    });
     
     editor.updateOptions({
       minimap: { enabled: true },
@@ -632,16 +655,27 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     newMode: 'code' | 'preview',
   ) => {
     if (newMode !== null) {
+      console.log(`View mode change for index ${index} to ${newMode}`);
+      console.log(`codes[${index + 1}]:`, codes[index + 1]?.substring(0, 100) + '...');
+      console.log('Full codes array:', codes.map((code, i) => `codes[${i}]: ${code ? code.substring(0, 50) + '...' : 'EMPTY'}`));
+      console.log('Current viewModes:', viewModes);
+      console.log('Selected models:', selectedModels);
+      
       const newViewModes = [...viewModes];
       newViewModes[index] = newMode;
       setViewModes(newViewModes);
       
       // Update preview content
       const codeContent = codes[index + 1];
+      console.log(`Code content for preview (index ${index + 1}):`, codeContent ? `${codeContent.length} characters` : 'EMPTY/NULL');
+      
       if (newMode === 'preview' && codeContent) {
         try {
           // The code will be extracted again in getPreviewContent
+          console.log(`Generating preview URL for index ${index}...`);
           const newUrl = getPreviewContent(codeContent, language);
+          console.log(`Generated preview URL:`, newUrl ? 'Success' : 'Failed');
+          
           const newPreviewUrls = [...previewUrls];
           
           // Clean up old URL if it exists
@@ -651,10 +685,13 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
           
           newPreviewUrls[index] = newUrl;
           setPreviewUrls(newPreviewUrls);
+          console.log(`Updated previewUrls[${index}]:`, newUrl ? 'Set' : 'Not set');
         } catch (error) {
           console.error('Error updating preview:', error);
           setError('Failed to update preview');
         }
+      } else if (newMode === 'preview' && !codeContent) {
+        console.warn(`No code content available for preview at index ${index + 1}`);
       } else if (newMode === 'code' && previewUrls[index]) {
         // Clean up URL when switching back to code view
         URL.revokeObjectURL(previewUrls[index]!);
@@ -670,7 +707,11 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     
     try {
       const modelLabel = languageModels.find(model => model.value === selectedModels[index])?.label || 'Unknown';
-      const codeToImport = codes[index];
+      const codeToImport = codes[index + 1];
+      
+      console.log('Import clicked for index:', index);
+      console.log('Code to import:', codeToImport?.substring(0, 100) + '...');
+      console.log('Current codes[0] before import:', codes[0]?.substring(0, 100) + '...');
       
       if (!codeToImport) {
         console.error('No code to import');
@@ -692,8 +733,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         }),
       });
 
+      console.log('Calling onCodeChange(0) with code:', codeToImport?.substring(0, 100) + '...');
       onCodeChange(0)(codeToImport);
-      onEditorSelect(index);
+      console.log('Import completed successfully');
     } catch (error) {
       console.error('Error saving code history:', error);
     }
@@ -763,8 +805,8 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
               - Editor instance available: ${!!editorInstancesMap.get(model)}
               - Code length: ${result.code.length}`);
 
-            // Update the code for the correct editor index
-            onCodeChange(index)(result.code);
+            // Update the code for the correct editor index (add 1 since index 0 is the main editor)
+            onCodeChange(index + 1)(result.code);
             
             // Update explanations for the correct index
             const newExplanations = [...explanations];
@@ -775,9 +817,14 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
             const editorInstance = editorInstancesMap.get(model);
             if (editorInstance) {
               console.log(`Updating editor instance for ${model}`);
-              editorInstance.setValue(result.code);
+              try {
+                editorInstance.setValue(result.code);
+              } catch (editorError) {
+                console.error(`Error updating editor for ${model}:`, editorError);
+              }
             } else {
-              console.error(`No editor instance found for model: ${model}`);
+              console.warn(`No editor instance found for model: ${model}. Available instances:`, Array.from(editorInstancesMap.keys()));
+              // Editor might not be mounted yet, the code will be set through onCodeChange
             }
           }
         });
@@ -796,15 +843,28 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   };
 
   const handleCodeChange = (index: number) => (newCode: string | undefined) => {
+    console.log(`handleCodeChange called for index ${index}:`, newCode ? `${newCode.length} characters` : 'EMPTY/UNDEFINED');
+    console.log(`Code preview for index ${index}:`, newCode?.substring(0, 100) + '...');
+    
     if (onCodeChange && typeof onCodeChange === 'function' && newCode !== undefined) {
+      console.log(`Calling parent onCodeChange(${index}) with code`);
       onCodeChange(index)(newCode);
+    } else {
+      console.warn(`onCodeChange not called for index ${index}:`, {
+        onCodeChangeExists: !!onCodeChange,
+        isFunction: typeof onCodeChange === 'function',
+        newCodeUndefined: newCode === undefined
+      });
     }
   };
 
   // Update preview URLs and explanations when codes change
   useEffect(() => {
     const newPreviewUrls = codes.map((code, index) => {
-      if (viewModes[index] === 'preview' && code) {
+      // For comparison editors, index 0 is the main editor, 1+ are comparison editors
+      // So we need to map comparison editor indices correctly
+      const comparisonIndex = index - 1;
+      if (comparisonIndex >= 0 && comparisonIndex < viewModes.length && viewModes[comparisonIndex] === 'preview' && code) {
         return getPreviewContent(code, firstDropdownValue);
       }
       return null;
@@ -815,10 +875,10 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       if (url) URL.revokeObjectURL(url);
     });
 
-    setPreviewUrls(newPreviewUrls);
+    setPreviewUrls(newPreviewUrls.slice(1)); // Remove the first element since it's for the main editor
 
     // Update explanations
-    const newExplanations = codes.map(code => {
+    const newExplanations = codes.slice(1).map(code => {
       const { explanation } = extractCodeAndExplanation(code, firstDropdownValue);
       return explanation;
     });
@@ -954,7 +1014,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
             </Box>
           </>
         )}
-        <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden', height: '100%' }}>
           {secondRadioValue !== 'none' && Array.from({ length: parseInt(secondRadioValue) }).map((_, index) => (
             <React.Fragment key={index}>
               <EditorWrapper>
@@ -986,47 +1046,76 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                     </Tooltip>
                   </Box>
                 </EditorTitle>
-                {explanations[index] && (
-                  <Box sx={{ 
-                    p: 2, 
-                    backgroundColor: '#2d2d2d',
-                    borderBottom: '1px solid #3d3d3d',
-                    color: '#9d9d9d',
-                    fontSize: '0.875rem',
-                    whiteSpace: 'pre-wrap'
-                  }}>
-                    {explanations[index]}
-                  </Box>
-                )}
-                <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                <Box sx={{ 
+                  flex: 1, 
+                  position: 'relative', 
+                  overflow: 'hidden', 
+                  minHeight: '0',
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}>
                   {isSubmitting && (
                     <LoadingOverlay>
                       <CircularProgress />
                     </LoadingOverlay>
                   )}
                   {viewModes[index] === 'code' ? (
-                    <Editor
-                      key={`editor-${index}`}
-                      height="100%"
-                      defaultLanguage={firstDropdownValue}
-                      value={codes[index] || ''}
-                      onChange={(value) => handleCodeChange(index)(value)}
-                      onMount={(editor, monaco) => handleEditorDidMount(editor, monaco, index)}
-                      theme="vs-dark"
-                      options={{
-                        readOnly: true,
-                        minimap: { enabled: true },
-                        fontSize: 14,
-                        wordWrap: 'on',
-                        automaticLayout: true,
-                      }}
-                    />
-                  ) : previewUrls[index] ? (
-                    <PreviewFrame
-                      src={previewUrls[index] || ''}
-                      title={`Preview ${index + 1}`}
-                      sandbox="allow-scripts allow-same-origin"
-                    />
+                    <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                      <Editor
+                        key={`editor-${index}-${selectedModels[index]}`}
+                        height="100%"
+                        defaultLanguage={firstDropdownValue}
+                        value={codes[index + 1] || ''}
+                        onChange={(value: any) => handleCodeChange(index + 1)(value)}
+                        onMount={(editor: any, monaco: any) => handleEditorDidMount(editor, monaco, index)}
+                        theme="vs-dark"
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: true },
+                          fontSize: 14,
+                          wordWrap: 'on',
+                          automaticLayout: true,
+                          scrollBeyondLastLine: false,
+                          scrollbar: {
+                            vertical: 'visible',
+                            horizontal: 'visible',
+                            verticalScrollbarSize: 12,
+                            horizontalScrollbarSize: 12,
+                          },
+                        }}
+                      />
+                    </Box>
+                  ) : viewModes[index] === 'preview' ? (
+                    previewUrls[index] ? (
+                      <PreviewFrame
+                        src={previewUrls[index] || ''}
+                        title={`Preview ${index + 1}`}
+                        sandbox="allow-scripts allow-same-origin"
+                        style={{ 
+                          flex: 1,
+                          height: '100%',
+                          border: 'none',
+                          backgroundColor: 'white',
+                          overflow: 'auto'
+                        }}
+                      />
+                    ) : (
+                      <Box sx={{ 
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#9d9d9d',
+                        backgroundColor: '#1e1e1e',
+                        padding: 2,
+                        textAlign: 'center'
+                      }}>
+                        {codes[index + 1] ? 
+                          'Generating preview...' : 
+                          'No code available for preview'
+                        }
+                      </Box>
+                    )
                   ) : null}
                 </Box>
               </EditorWrapper>
