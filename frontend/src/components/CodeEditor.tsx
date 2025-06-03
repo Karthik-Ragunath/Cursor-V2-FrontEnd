@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import type { OnMount, BeforeMount } from '@monaco-editor/react';
 import { Box } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { executeCode } from '../services/api';
@@ -43,6 +44,25 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const handleBeforeMount: BeforeMount = (monaco) => {
+    monaco.editor.defineTheme('solarized-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: '', foreground: '839496', background: '002b36' },
+        { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+        { token: 'keyword', foreground: '859900' },
+        { token: 'number', foreground: '2aa198' },
+        { token: 'string', foreground: '2aa198' },
+        { token: 'variable', foreground: 'b58900' },
+        { token: 'type', foreground: '268bd2' },
+        { token: 'function', foreground: '268bd2' },
+        { token: 'constant', foreground: 'cb4b16' },
+      ],
+      colors: {}
+    });
+  };
+
   useEffect(() => {
     // Execute code whenever language changes
     const notifyLanguageChange = async () => {
@@ -76,10 +96,12 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
           language={language}
           value={value}
           onChange={onChange}
-          theme="vs-dark"
+          theme="solarized-dark"
+          beforeMount={handleBeforeMount}
           options={{
             minimap: { enabled: true },
             fontSize: 14,
+            fontFamily: 'Monaco, "Courier New", monospace',
             wordWrap: 'on',
             automaticLayout: true,
           }}

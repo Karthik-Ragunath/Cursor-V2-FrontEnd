@@ -32,6 +32,7 @@ const EditorsSection = styled(Box)({
   flex: 1,
   overflow: 'hidden',
   position: 'relative',
+  transition: 'all 0.3s ease-in-out',
   '&::after': {
     content: '""',
     position: 'absolute',
@@ -50,6 +51,7 @@ const MainEditorContainer = styled(Box)({
   height: '100%',
   background: 'rgba(30, 30, 30, 0.6)',
   backdropFilter: 'blur(10px)',
+  transition: 'width 0.3s ease-in-out'
 });
 
 const ResizeHandle = styled(Box)({
@@ -331,9 +333,10 @@ const MainApp = () => {
             </Resizable>
             {secondRadioValue !== 'none' && (
               <Box sx={{ 
+                display: 'flex', 
                 flex: 1,
                 minWidth: secondRadioValue === '1' ? '400px' : `${parseInt(secondRadioValue) * 400}px`,
-                display: 'flex',
+                transition: 'all 0.3s ease-in-out',
                 overflow: 'auto'
               }}>
                 <ComparisonEditors

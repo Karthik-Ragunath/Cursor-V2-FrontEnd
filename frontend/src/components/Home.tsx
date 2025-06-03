@@ -86,7 +86,7 @@ const Home = () => {
         Welcome to Cursor V2
       </Title>
       <Subtitle variant="h5">
-        Experience the next generation of intelligent coding with our advanced AI-powered platform
+        Experience the next iteration of frontend development with our AI-powered platform
       </Subtitle>
       <GetStartedButton 
         variant="contained"
