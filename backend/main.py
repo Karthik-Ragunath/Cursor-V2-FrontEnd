@@ -36,24 +36,25 @@ frontend_info_cache: Dict[str, Any] = {}
 
 # Model configurations
 MODEL_ZOO = {
-    'claude-3.5': 'claude-3-5-sonnet-20241022',
-    'claude-3-haiku': 'claude-3-haiku-20240307',
-    'deepseek': 'deepseek-ai/deepseek-coder-7b-instruct-v1.5'
+    'claude': {
+        '3.5': 'claude-3-5-sonnet-20241022',
+        'haiku': 'claude-3-haiku-20240307'
+    },
+    'deepseek': {
+        'coder': 'deepseek-ai/deepseek-coder-7b-instruct-v1.5',
+        'base': 'base'
+    },
+    'manim': {
+        'finetuned': 'finetuned'
+    }
 }
 
-# Local manim model server configuration
-MANIM_MODEL_SERVER_URL = "http://localhost:8001"
-
-# Mapping for manim models
-MANIM_MODEL_MAPPING = {
-    'Main Finetuned': 'finetuned',  # Maps to LoRA finetuned model
-    'Deepseek': 'base'             # Maps to base model
-}
+MANIM_MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[f"http://localhost:{os.getenv('FRONTEND_PORT')}"],
+    allow_origins=[f"http://localhost:{os.getenv("FRONTEND_PORT")}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -235,6 +236,22 @@ def extract_code_block(text: str) -> str:
         return '\n'.join(code_lines).strip()
 
 async def generate_code(prompt: str, language: str, model: str) -> str:
+    """
+    Generates code using the specified AI model and language based on the provided prompt.
+    
+    Attempts up to three times to generate code by sending requests to the appropriate model API (local Manim server, Anthropic Claude, or Deepseek via HuggingFace), depending on the language and model. Incorporates recent prompt history into the request. Raises an HTTPException if all attempts fail or if the model is unsupported.
+    
+    Args:
+        prompt: The user prompt or instruction for code generation.
+        language: The programming language or domain for code generation.
+        model: The model identifier or variant to use for code generation.
+    
+    Returns:
+        The generated code as a string.
+    
+    Raises:
+        HTTPException: If the model is unsupported or if code generation fails after all retries.
+    """
     max_retries = 3
     retry_count = 0
     last_error = None
@@ -250,8 +267,8 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
             
             async with httpx.AsyncClient(timeout=300.0) as client:
                 # Handle manim models first
-                if language == 'manim' and model in MANIM_MODEL_MAPPING:
-                    model_type = MANIM_MODEL_MAPPING[model]
+                if language == 'manim':
+                    model_type = MODEL_ZOO['manim'][model]
                     logger.debug(f"Sending request to local manim model server for {model} -> {model_type}")
                     
                     response = await client.post(
@@ -275,9 +292,17 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                     logger.debug(f"Received response from local manim model server")
                     return result['generated_code'].strip()
                 
-                # Handle other models
-                elif model in ['claude-3.5', 'claude-3-haiku']:  # Handle both Claude models
-                    logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
+                # Handle Claude models
+                elif model.startswith('claude-'):  # Handle all Claude models
+                    model_family = 'claude'
+                    model_variant = model.split('-')[1]  # Get '3.5' or 'haiku' from 'claude-3.5' or 'claude-haiku'
+                    
+                    if model_variant not in MODEL_ZOO[model_family]:
+                        error_msg = f"Unsupported Claude variant: {model_variant}"
+                        logger.error(error_msg)
+                        raise HTTPException(status_code=400, detail=error_msg)
+                    
+                    logger.debug(f"Using model mapping: {MODEL_ZOO[model_family][model_variant]}")
                     headers = {
                         "x-api-key": os.getenv('ANTHROPIC_API_KEY'),
                         "anthropic-version": "2023-06-01",
@@ -289,7 +314,7 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         "https://api.anthropic.com/v1/messages",
                         headers=headers,
                         json={
-                            "model": MODEL_ZOO[model],
+                            "model": MODEL_ZOO[model_family][model_variant],
                             "max_tokens": 2000,
                             "temperature": 0.1,
                             "system": full_prompt,
@@ -311,7 +336,7 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                     return result['content'][0]['text'].strip()
                 
                 elif model == 'deepseek':  # Deepseek model for non-manim languages
-                    logger.debug(f"Using model mapping: {MODEL_ZOO[model]}")
+                    logger.debug(f"Using model mapping: {MODEL_ZOO[language][model]}")
                     headers = {
                         "Authorization": f"Bearer {os.getenv('HUGGINGFACE_API_KEY')}",
                         "Content-Type": "application/json"
@@ -322,7 +347,7 @@ async def generate_code(prompt: str, language: str, model: str) -> str:
                         "https://router.huggingface.co/novita/v3/openai/chat/completions",
                         headers=headers,
                         json={
-                            "model": MODEL_ZOO[model],
+                            "model": MODEL_ZOO[language][model],
                             "messages": [
                                 {"role": "system", "content": full_prompt},
                                 {"role": "user", "content": "Generate the code with explanations."}
