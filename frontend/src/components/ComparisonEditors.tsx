@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, TextField, Typography, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel, CircularProgress, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { 
@@ -15,6 +15,9 @@ import {
 import Editor from '@monaco-editor/react';
 import { notifyComparisonCount, compareCode } from '../services/api';
 import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
+import claudeIcon from '../assets/claude.svg';
+import deepseekIcon from '../assets/deepseek.svg';
+import manimIcon from '../assets/manim.svg';
 
 // TypeScript declarations for Speech Recognition
 declare global {
@@ -109,18 +112,23 @@ const EditorWrapper = styled(Box)({
   flexDirection: 'column',
   backgroundColor: '#1e1e1e',
   minWidth: '150px',
-  overflow: 'hidden', // Changed back to hidden for wrapper
+  overflow: 'hidden',
 });
 
 const EditorContainer = styled(Box)({
+  display: 'flex',
+  flexDirection: 'column',
   flex: 1,
-  position: 'relative',
-  overflow: 'hidden', // Monaco editor handles its own scrolling
-  minHeight: '0', // Important for flex children to shrink
-  '& .monaco-editor': {
-    height: '100% !important',
-    width: '100% !important',
-  },
+  minHeight: 0, // Important for flex child
+  overflow: 'hidden',
+});
+
+const CodeEditorSection = styled(Box)({
+  display: 'flex',
+  flexDirection: 'column',
+  flex: 1,
+  minHeight: 0, // Important for flex child
+  overflow: 'hidden',
 });
 
 const EditorTitle = styled(Typography)(({ theme }) => ({
@@ -134,7 +142,7 @@ const EditorTitle = styled(Typography)(({ theme }) => ({
   justifyContent: 'space-between',
   position: 'relative',
   fontSize: '1rem',
-  fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+  fontFamily: 'Monaco, "Courier New", monospace',
   fontWeight: 400,
 }));
 
@@ -167,6 +175,8 @@ const PromptContainer = styled(Box)(({ theme }) => ({
   display: 'flex',
   gap: theme.spacing(1),
   alignItems: 'flex-start',
+  background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+  backdropFilter: 'blur(10px)',
 }));
 
 const StyledTextField = styled(TextField)(({ theme }) => ({
@@ -174,15 +184,29 @@ const StyledTextField = styled(TextField)(({ theme }) => ({
   '& .MuiInputBase-root': {
     color: 'white',
     fontSize: '0.875rem',
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    fontFamily: 'Monaco, "Courier New", monospace',
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    transition: 'all 0.3s ease',
   },
   '& .MuiOutlinedInput-root': {
     '& fieldset': {
-      borderColor: '#4d4d4d',
+      borderColor: 'rgba(96, 239, 255, 0.1)',
+      transition: 'border-color 0.3s ease',
     },
     '&:hover fieldset': {
-      borderColor: '#6d6d6d',
+      borderColor: 'rgba(0, 255, 135, 0.2)',
+    },
+    '&.Mui-focused fieldset': {
+      borderColor: 'rgba(96, 239, 255, 0.3)',
+      borderWidth: '2px',
+      boxShadow: '0 0 10px rgba(96, 239, 255, 0.1)',
+    },
+  },
+  '& .MuiInputBase-input': {
+    fontFamily: 'Monaco, "Courier New", monospace',
+    '&::placeholder': {
+      color: 'rgba(255, 255, 255, 0.5)',
+      opacity: 1,
     },
   },
 }));
@@ -223,11 +247,41 @@ const ViewToggle = styled(ToggleButtonGroup)(({ theme }) => ({
   },
 }));
 
+const ModelIcon = styled('img')({
+  width: '24px',
+  height: '24px',
+  marginRight: '8px',
+  borderRadius: '4px',
+  filter: 'drop-shadow(0 0 4px rgba(96, 239, 255, 0.3))',
+});
+
+const haikuIcon = claudeIcon; // Use Claude icon for Haiku variant
 const languageModels = [
-  { value: 'claude-3.5', label: 'Claude-3.5' },
-  { value: 'claude-3-haiku', label: 'Claude-3 Haiku' },
-  { value: 'deepseek', label: 'Deepseek Coder' }
+  { value: 'claude-3.5', label: 'Claude-3.5', icon: claudeIcon },
+  { value: 'claude-haiku', label: 'Claude-3 Haiku', icon: haikuIcon },
+  { value: 'deepseek-coder', label: 'Deepseek Coder', icon: deepseekIcon }
 ];
+
+const manimModels = [
+  { value: 'manim-finetuned', label: 'Manim Finetuned', icon: manimIcon },
+  { value: 'deepseek-base', label: 'Deepseek Base', icon: deepseekIcon },
+  { value: 'claude-3.5', label: 'Claude-3.5', icon: claudeIcon }
+];
+
+// Helper function to get model key for API
+const getModelKey = (modelValue: string): string => {
+  const [family, variant] = modelValue.split('-');
+  if (family === 'claude') {
+    return variant === '3.5' ? '3.5' : 'haiku';
+  }
+  if (family === 'deepseek') {
+    return variant === 'coder' ? 'coder' : 'base';
+  }
+  if (family === 'manim') {
+    return 'finetuned';
+  }
+  return modelValue;
+};
 
 interface CodeResult {
   model: string;
@@ -505,6 +559,57 @@ const getPreviewContent = (code: string, language: string): string => {
   }
 };
 
+const VerticalResizeHandle = styled(Box)({
+  width: '100%',
+  height: '6px',
+  cursor: 'row-resize',
+  backgroundColor: '#2d2d2d',
+  '&:hover': {
+    backgroundColor: '#4d4d4d',
+  },
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  zIndex: 10,
+  '&::after': {
+    content: '""',
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '30px',
+    height: '2px',
+    backgroundColor: '#666',
+  },
+});
+
+const ExplanationEditor = styled(Box)({
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: '100px',
+  maxHeight: '50%',
+  borderTop: '1px solid #3d3d3d',
+  backgroundColor: '#1e1e1e',
+  overflow: 'hidden',
+  position: 'relative',
+});
+
+const SectionTitle = styled(Typography)(({ theme }) => ({
+  padding: theme.spacing(1),
+  backgroundColor: '#2d2d2d',
+  color: 'white',
+  borderBottom: '1px solid #3d3d3d',
+  fontSize: '0.875rem',
+  fontWeight: 500,
+  flexShrink: 0,
+  fontFamily: 'Monaco, "Courier New", monospace',
+}));
+
+// Add this interface near your other interfaces
+interface EditorHeights {
+  [key: number]: number;
+}
+
 const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   count,
   codes,
@@ -525,6 +630,8 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<'replace' | 'append'>('replace');
+  const [explanationHeights, setExplanationHeights] = useState<EditorHeights>({});
+  const resizingRef = useRef<{ index: number; startY: number; startHeight: number } | null>(null);
 
   // Ensure firstDropdownValue is always a string
   const language = firstDropdownValue || 'html';
@@ -577,23 +684,21 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     console.log('Setting up models for count:', modelCount, 'language:', firstDropdownValue);
     
     // Define model sets based on language
-    const manimModels = ['Main Finetuned', 'Deepseek', 'Claude'];
-    const defaultModels = ['claude-3.5', 'claude-3-haiku', 'deepseek'];
-    const availableModels = firstDropdownValue === 'manim' ? manimModels : defaultModels;
+    const availableModels = firstDropdownValue === 'manim' ? manimModels : languageModels;
     
     if (modelCount === 1) {
-      const newModels = [availableModels[0]];
+      const newModels = [availableModels[0].value];
       console.log('Setting up 1 model:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(1).fill('code'));
     } else if (modelCount === 2) {
       // Set both models by default
-      const newModels = [availableModels[0], availableModels[1]];
+      const newModels = [availableModels[0].value, availableModels[1].value];
       console.log('Setting up 2 models:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(2).fill('code'));
     } else if (modelCount === 3) {
-      const newModels = [availableModels[0], availableModels[1], availableModels[2]];
+      const newModels = [availableModels[0].value, availableModels[1].value, availableModels[2].value];
       console.log('Setting up 3 models:', newModels);
       setSelectedModels(newModels);
       setViewModes(Array(3).fill('code'));
@@ -633,10 +738,35 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
       console.log('Editor instances after mount:', Array.from(newMap.keys()));
       return newMap;
     });
+
+    // Add strong CSS overrides for Monaco font
+    const styleSheet = document.createElement('style');
+    styleSheet.textContent = `
+      .monaco-editor,
+      .monaco-editor .inputarea.ime-input,
+      .monaco-editor .editor-scrollable,
+      .monaco-editor .view-lines,
+      .monaco-editor .view-line span,
+      .monaco-editor-background {
+        font-family: Monaco, Menlo, "Courier New", monospace !important;
+        font-feature-settings: "liga" 0, "calt" 0 !important;
+        -webkit-font-feature-settings: "liga" 0, "calt" 0 !important;
+        font-variation-settings: normal !important;
+        font-variant: normal !important;
+      }
+      .monaco-editor .line-numbers {
+        font-family: Monaco, Menlo, "Courier New", monospace !important;
+        font-feature-settings: "liga" 0, "calt" 0 !important;
+      }
+    `;
+    document.head.appendChild(styleSheet);
     
+    // Update editor options
     editor.updateOptions({
       minimap: { enabled: true },
       fontSize: 14,
+      fontFamily: "Monaco, Menlo, 'Courier New', monospace",
+      fontLigatures: false,
       wordWrap: 'on',
       automaticLayout: true,
       readOnly: true,
@@ -647,7 +777,13 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         verticalScrollbarSize: 12,
         horizontalScrollbarSize: 12,
       },
+      fontWeight: "400",
+      letterSpacing: 0,
     });
+
+    // Force refresh the editor
+    editor.layout();
+    editor.render(true);
   };
 
   const handleViewModeChange = (index: number) => (
@@ -893,36 +1029,139 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     };
   }, [codes, viewModes, firstDropdownValue]);
 
+  // Add these new handlers
+  const handleResizeStart = (e: React.MouseEvent, index: number) => {
+    e.preventDefault(); // Prevent text selection during drag
+    const editor = e.currentTarget.closest('.explanation-editor');
+    if (editor) {
+      const startHeight = editor.getBoundingClientRect().height;
+      resizingRef.current = {
+        index,
+        startY: e.clientY,
+        startHeight: startHeight,
+      };
+      
+      // Add temporary event listeners
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      
+      // Add a class to disable text selection during resize
+      document.body.style.userSelect = 'none';
+    }
+  };
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingRef.current) return;
+
+    const { index, startY, startHeight } = resizingRef.current;
+    const deltaY = e.clientY - startY;
+    const newHeight = Math.max(100, Math.min(startHeight - deltaY, window.innerHeight * 0.5));
+
+    setExplanationHeights(prev => ({
+      ...prev,
+      [index]: newHeight,
+    }));
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    if (!resizingRef.current) return;
+    
+    // Remove temporary event listeners
+    document.removeEventListener('mousemove', handleResizeMove);
+    document.removeEventListener('mouseup', handleResizeEnd);
+    
+    // Re-enable text selection
+    document.body.style.userSelect = '';
+    
+    resizingRef.current = null;
+  }, [handleResizeMove]);
+
   return (
     <Container>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Box component="div" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {secondRadioValue !== 'none' && (
           <>
-            <Box sx={{ p: 2, backgroundColor: '#2d2d2d', borderBottom: '1px solid #3d3d3d' }}>
-              <Box sx={{ 
+            <Box component="div" sx={{ 
+              p: 2, 
+              backgroundColor: '#2d2d2d', 
+              borderBottom: '1px solid #3d3d3d',
+              background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+              backdropFilter: 'blur(10px)',
+            }}>
+              <Box component="div" sx={{ 
                 display: 'flex', 
                 gap: 2, 
                 mb: 2,
-                flexWrap: 'wrap', // Allow wrapping for small screens
+                flexWrap: 'wrap',
                 justifyContent: 'flex-start' 
               }}>
                 {Array.from({ length: parseInt(secondRadioValue) }).map((_, index) => (
                   <FormControl key={index} size="small" sx={{ minWidth: 180, flex: '1 1 auto' }}>
-                    <InputLabel sx={{ color: 'white' }}>Model {index + 1}</InputLabel>
+                    <InputLabel sx={{ 
+                      color: 'white',
+                      '&.Mui-focused': {
+                        background: 'linear-gradient(90deg, #00ff87 0%, #60efff 100%)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                      }
+                    }}>Model {index + 1}</InputLabel>
                     <Select
                       value={selectedModels[index] || ''}
                       onChange={handleModelChange(index)}
                       sx={{ 
                         color: 'white',
-                        maxWidth: '100%'
+                        maxWidth: '100%',
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(96, 239, 255, 0.1)',
+                        },
+                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(0, 255, 135, 0.2)',
+                        },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                          borderColor: 'rgba(96, 239, 255, 0.3)',
+                          borderWidth: '2px',
+                          boxShadow: '0 0 10px rgba(96, 239, 255, 0.1)',
+                        }
+                      }}
+                      MenuProps={{
+                        PaperProps: {
+                          sx: {
+                            backgroundColor: '#2d2d2d',
+                            backgroundImage: 'linear-gradient(135deg, rgba(0, 255, 135, 0.05) 0%, rgba(96, 239, 255, 0.05) 100%)',
+                            backdropFilter: 'blur(10px)',
+                            '& .MuiMenuItem-root': {
+                              color: 'white',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '8px 16px',
+                              '&:hover': {
+                                background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                              },
+                              '&.Mui-selected': {
+                                background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                                '&:hover': {
+                                  background: 'linear-gradient(90deg, rgba(0, 255, 135, 0.3) 0%, rgba(96, 239, 255, 0.3) 100%)',
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }}
+                      renderValue={(selected) => {
+                        const models = firstDropdownValue === 'manim' ? manimModels : languageModels;
+                        const model = models.find(m => m.value === selected);
+                        return (
+                          <Box component="div" sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {model && <ModelIcon src={model.icon} alt={model.label} />}
+                            <span>{model?.label || 'Select Model'}</span>
+                          </Box>
+                        );
                       }}
                     >
-                      {(firstDropdownValue === 'manim' ? [
-                        { value: 'Main Finetuned', label: 'Manim Finetuned' },
-                        { value: 'Deepseek', label: 'Deepseek-Coder' },
-                        { value: 'Claude', label: 'Claude-3.5' }
-                      ] : languageModels).map((model) => (
+                      {(firstDropdownValue === 'manim' ? manimModels : languageModels).map((model) => (
                         <MenuItem key={model.value} value={model.value}>
+                          <ModelIcon src={model.icon} alt={model.label} />
                           {model.label}
                         </MenuItem>
                       ))}
@@ -955,9 +1194,15 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         onClick={() => setVoiceMode(voiceMode === 'replace' ? 'append' : 'replace')}
                         sx={{
                           color: voiceMode === 'replace' ? '#4CAF50' : '#FF9800',
-                          '&:hover': { color: voiceMode === 'replace' ? '#45a049' : '#e68900' },
+                          background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                          border: '1px solid rgba(96, 239, 255, 0.2)',
+                          '&:hover': { 
+                            color: voiceMode === 'replace' ? '#45a049' : '#e68900',
+                            background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                          },
                           minWidth: '48px',
                           height: '48px',
+                          borderRadius: '8px',
                         }}
                       >
                         <SwapHorizIcon />
@@ -969,11 +1214,20 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                         disabled={isSubmitting}
                         sx={{
                           color: isListening ? '#ff6b6b' : '#9d9d9d',
-                          '&:hover': { color: isListening ? '#ff5252' : '#fff' },
-                          '&.Mui-disabled': { color: '#4d4d4d' },
+                          background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                          border: '1px solid rgba(96, 239, 255, 0.2)',
+                          '&:hover': { 
+                            color: isListening ? '#ff5252' : '#fff',
+                            background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                          },
+                          '&.Mui-disabled': { 
+                            color: '#4d4d4d',
+                            background: 'rgba(45, 45, 45, 0.5)',
+                          },
                           animation: isListening ? 'pulse 1.5s infinite' : 'none',
                           minWidth: '48px',
                           height: '48px',
+                          borderRadius: '8px',
                         }}
                       >
                         {isListening ? <StopIcon /> : <MicIcon />}
@@ -986,17 +1240,26 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                   disabled={isSubmitting}
                   sx={{
                     color: '#9d9d9d',
-                    '&:hover': { color: '#fff' },
-                    '&.Mui-disabled': { color: '#4d4d4d' },
+                    background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.1) 0%, rgba(96, 239, 255, 0.1) 100%)',
+                    border: '1px solid rgba(96, 239, 255, 0.2)',
+                    '&:hover': { 
+                      color: '#fff',
+                      background: 'linear-gradient(135deg, rgba(0, 255, 135, 0.2) 0%, rgba(96, 239, 255, 0.2) 100%)',
+                    },
+                    '&.Mui-disabled': { 
+                      color: '#4d4d4d',
+                      background: 'rgba(45, 45, 45, 0.5)',
+                    },
                     minWidth: '48px',
                     height: '48px',
+                    borderRadius: '8px',
                   }}
                 >
                   {isSubmitting ? <CircularProgress size={24} /> : <SendIcon />}
                 </IconButton>
               </Box>
               {error && (
-                <Box sx={{ 
+                <Box component="div" sx={{ 
                   mt: 1,
                   p: 1,
                   backgroundColor: 'rgba(255, 0, 0, 0.1)',
@@ -1021,7 +1284,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                 <EditorTitle>
                   {!selectedModels[index] || selectedModels[index] === '' ? 
                     'Model Output' : 
-                    languageModels.find(model => model.value === selectedModels[index])?.label || 'Unknown'}
+                    (firstDropdownValue === 'manim' ? 
+                      manimModels.find(model => model.value === selectedModels[index])?.label : 
+                      languageModels.find(model => model.value === selectedModels[index])?.label) || 'Unknown'}
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {['html', 'css', 'javascript'].includes(firstDropdownValue) && (
                       <ViewToggle
@@ -1046,78 +1311,117 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                     </Tooltip>
                   </Box>
                 </EditorTitle>
-                <Box sx={{ 
-                  flex: 1, 
-                  position: 'relative', 
-                  overflow: 'hidden', 
-                  minHeight: '0',
-                  display: 'flex',
-                  flexDirection: 'column'
-                }}>
-                  {isSubmitting && (
-                    <LoadingOverlay>
-                      <CircularProgress />
-                    </LoadingOverlay>
-                  )}
-                  {viewModes[index] === 'code' ? (
-                    <Box sx={{ flex: 1, overflow: 'hidden' }}>
-                      <Editor
-                        key={`editor-${index}-${selectedModels[index]}`}
-                        height="100%"
-                        defaultLanguage={firstDropdownValue}
-                        value={codes[index + 1] || ''}
-                        onChange={(value: any) => handleCodeChange(index + 1)(value)}
-                        onMount={(editor: any, monaco: any) => handleEditorDidMount(editor, monaco, index)}
-                        theme="vs-dark"
-                        options={{
-                          readOnly: true,
-                          minimap: { enabled: true },
-                          fontSize: 14,
-                          wordWrap: 'on',
-                          automaticLayout: true,
-                          scrollBeyondLastLine: false,
-                          scrollbar: {
-                            vertical: 'visible',
-                            horizontal: 'visible',
-                            verticalScrollbarSize: 12,
-                            horizontalScrollbarSize: 12,
-                          },
-                        }}
-                      />
-                    </Box>
-                  ) : viewModes[index] === 'preview' ? (
-                    previewUrls[index] ? (
-                      <PreviewFrame
-                        src={previewUrls[index] || ''}
-                        title={`Preview ${index + 1}`}
-                        sandbox="allow-scripts allow-same-origin"
-                        style={{ 
-                          flex: 1,
-                          height: '100%',
-                          border: 'none',
-                          backgroundColor: 'white',
-                          overflow: 'auto'
-                        }}
-                      />
-                    ) : (
-                      <Box sx={{ 
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#9d9d9d',
-                        backgroundColor: '#1e1e1e',
-                        padding: 2,
-                        textAlign: 'center'
-                      }}>
-                        {codes[index + 1] ? 
-                          'Generating preview...' : 
-                          'No code available for preview'
-                        }
+                <EditorContainer>
+                  <CodeEditorSection>
+                    <SectionTitle>Code</SectionTitle>
+                    {isSubmitting && (
+                      <LoadingOverlay>
+                        <CircularProgress />
+                      </LoadingOverlay>
+                    )}
+                    {viewModes[index] === 'code' ? (
+                      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                        <Editor
+                          key={`editor-${index}-${selectedModels[index]}`}
+                          height="100%"
+                          defaultLanguage={firstDropdownValue}
+                          value={codes[index + 1] || ''}
+                          onChange={(value: any) => handleCodeChange(index + 1)(value)}
+                          onMount={(editor: any, monaco: any) => handleEditorDidMount(editor, monaco, index)}
+                          theme="vs-dark"
+                          options={{
+                            readOnly: true,
+                            minimap: { enabled: true },
+                            fontSize: 14,
+                            fontFamily: "Monaco, Menlo, 'Courier New', monospace",
+                            fontLigatures: false,
+                            wordWrap: 'on',
+                            automaticLayout: true,
+                            scrollBeyondLastLine: false,
+                            scrollbar: {
+                              vertical: 'visible',
+                              horizontal: 'visible',
+                              verticalScrollbarSize: 12,
+                              horizontalScrollbarSize: 12,
+                            },
+                            fontWeight: "400",
+                            letterSpacing: 0,
+                          }}
+                        />
                       </Box>
-                    )
-                  ) : null}
-                </Box>
+                    ) : viewModes[index] === 'preview' ? (
+                      previewUrls[index] ? (
+                        <PreviewFrame
+                          src={previewUrls[index] || ''}
+                          title={`Preview ${index + 1}`}
+                          sandbox="allow-scripts allow-same-origin"
+                          style={{ 
+                            flex: 1,
+                            height: '100%',
+                            border: 'none',
+                            backgroundColor: 'white',
+                            overflow: 'auto'
+                          }}
+                        />
+                      ) : (
+                        <Box sx={{ 
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#9d9d9d',
+                          backgroundColor: '#1e1e1e',
+                          padding: 2,
+                          textAlign: 'center'
+                        }}>
+                          {codes[index + 1] ? 
+                            'Generating preview...' : 
+                            'No code available for preview'
+                          }
+                        </Box>
+                      )
+                    ) : null}
+                  </CodeEditorSection>
+                  <ExplanationEditor
+                    className="explanation-editor"
+                    style={{ height: explanationHeights[index] || 200 }}
+                  >
+                    <VerticalResizeHandle
+                      onMouseDown={(e) => handleResizeStart(e, index)}
+                    />
+                    <Box sx={{ pt: '6px', display: 'flex', flexDirection: 'column', height: '100%' }}>
+                      <SectionTitle>Explanation</SectionTitle>
+                      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                        <Editor
+                          height="100%"
+                          defaultLanguage="markdown"
+                          value={explanations[index] || ''}
+                          onChange={(value) => {
+                            const newExplanations = [...explanations];
+                            newExplanations[index] = value || '';
+                            setExplanations(newExplanations);
+                          }}
+                          theme="vs-dark"
+                          options={{
+                            minimap: { enabled: false },
+                            fontSize: 14,
+                            fontFamily: "Monaco, Menlo, 'Courier New', monospace",
+                            fontLigatures: false,
+                            wordWrap: 'on',
+                            lineNumbers: 'off',
+                            glyphMargin: false,
+                            folding: false,
+                            lineDecorationsWidth: 0,
+                            lineNumbersMinChars: 0,
+                            automaticLayout: true,
+                            fontWeight: "400",
+                            letterSpacing: 0,
+                          }}
+                        />
+                      </Box>
+                    </Box>
+                  </ExplanationEditor>
+                </EditorContainer>
               </EditorWrapper>
               {index < parseInt(secondRadioValue) - 1 && <ResizeHandle />}
             </React.Fragment>
