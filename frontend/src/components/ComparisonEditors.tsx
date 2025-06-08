@@ -329,7 +329,12 @@ interface CodeExecuteRequest {
 }
 
 const extractCodeAndExplanation = (text: string | null | undefined, language: string): { code: string; explanation: string } => {
-  if (!text) return { code: '', explanation: '' };
+  if (!text) {
+    console.log('extractCodeAndExplanation: Input text is null or undefined');
+    return { code: '', explanation: '' };
+  }
+  
+  console.log('extractCodeAndExplanation: Processing text:', text.substring(0, 100) + '...');
   
   let explanation = '';
   let codeContent = '';
@@ -344,10 +349,12 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
   if (codeMatch && codeMatch[1]) {
     // Found new format with ```code block
     codeContent = codeMatch[1].trim();
+    console.log('Found ```code block:', codeContent.substring(0, 100) + '...');
     
     if (expMatch && expMatch[1]) {
       // Found explanation block
       explanation = expMatch[1].trim();
+      console.log('Found ```exp block:', explanation.substring(0, 100) + '...');
     }
     
     return {
@@ -361,23 +368,47 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
   const matches = text.matchAll(standardCodeBlockRegex);
   const codeBlocks = Array.from(matches);
   
+  console.log('Standard code block matches:', codeBlocks.length);
+  
   if (codeBlocks.length > 0) {
-    // Combine all code blocks, ensuring match[1] exists
-    codeContent = codeBlocks
-      .map(match => (match && match[1] ? match[1].trim() : ''))
-      .filter(Boolean)
-      .join('\n\n');
+    // First, extract all the code blocks
+    const codeMatches = codeBlocks.map(match => ({
+      full: match[0],  // The full match including backticks
+      code: match[1].trim()  // Just the code content
+    }));
     
-    // Everything else is explanation (but we'll ignore it for the editor)
+    // Join all code blocks
+    codeContent = codeMatches.map(m => m.code).join('\n\n');
+    
+    // Now extract explanation by removing all code blocks from the text
+    let explanationText = text;
+    codeMatches.forEach(match => {
+      explanationText = explanationText.replace(match.full, '');
+    });
+    
+    // Clean up the explanation text
+    explanation = explanationText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !line.startsWith('```'))  // Remove any remaining backtick lines
+      .join('\n');
+    
+    console.log('Extracted from standard blocks:', {
+      codeLength: codeContent.length,
+      explanationLength: explanation.length,
+      explanationPreview: explanation.substring(0, 100) + '...'
+    });
+    
     return {
       code: codeContent,
-      explanation: '' // Don't show explanations in the UI
+      explanation: explanation
     };
   }
 
-  // If no proper code blocks found, try to detect HTML/CSS/JS patterns and extract only those
+  // If no proper code blocks found, try to detect HTML/CSS/JS patterns
   const lines = text.split('\n');
   const codeLines: string[] = [];
+  const explanationLines: string[] = [];
   let inCodeSection = false;
 
   for (let line of lines) {
@@ -386,8 +417,8 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
     // Skip empty lines
     if (!trimmedLine) continue;
 
-    // Skip obvious explanation lines
-    if (
+    // Check if line looks like explanation
+    const isExplanationLine = 
       trimmedLine.toLowerCase().includes('here\'s how') ||
       trimmedLine.toLowerCase().includes('the code works') ||
       trimmedLine.toLowerCase().includes('document structure') ||
@@ -395,8 +426,13 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
       trimmedLine.toLowerCase().includes('accessibility features') ||
       trimmedLine.toLowerCase().includes('the result is') ||
       trimmedLine.match(/^\d+\.\s/) || // Numbered lists
-      trimmedLine.startsWith('- ') && !trimmedLine.includes(':') // Simple bullet points without CSS properties
-    ) {
+      (trimmedLine.startsWith('- ') && !trimmedLine.includes(':')) || // Simple bullet points without CSS properties
+      trimmedLine.toLowerCase().includes('explanation:') ||
+      trimmedLine.toLowerCase().includes('note:') ||
+      trimmedLine.toLowerCase().includes('this code');
+
+    if (isExplanationLine) {
+      explanationLines.push(line);
       continue;
     }
 
@@ -437,34 +473,44 @@ const extractCodeAndExplanation = (text: string | null | undefined, language: st
     } else if (inCodeSection && trimmedLine.startsWith('//')) {
       // Include code comments only if we're already in a code section
       codeLines.push(line);
+    } else if (!isCodeLine && trimmedLine.length > 0) {
+      // If it's not code and not empty, it's probably explanation
+      explanationLines.push(line);
     }
   }
 
   codeContent = codeLines.join('\n').trim();
+  explanation = explanationLines.join('\n').trim();
+
+  console.log('Extracted from pattern matching:', {
+    codeLength: codeContent.length,
+    explanationLength: explanation.length,
+    explanationPreview: explanation.substring(0, 100) + '...'
+  });
 
   return {
     code: codeContent,
-    explanation: '' // Don't show explanations in the UI
+    explanation: explanation
   };
 };
 
 const getPreviewContent = (code: string, language: string): string => {
   if (!code) return '';
   
-  // Extract only the code portion, ignore explanations
+  console.log("Generating preview for code:", code.substring(0, 100) + '...');
+  
+  // Extract just the code portion using the helper function
   const { code: extractedCode } = extractCodeAndExplanation(code, language);
-  console.log("Extracted code:", extractedCode);
+  
   switch (language.toLowerCase()) {
     case 'html':
       const isCompleteHTML = extractedCode.trim().toLowerCase().includes('<!doctype') || 
-                            extractedCode.trim().toLowerCase().includes('<html');
+                          extractedCode.trim().toLowerCase().includes('<html');
       
       if (isCompleteHTML) {
         // Use the code as-is since it's already a complete HTML document
-        console.log("Extracted code is complete HTML:", "YAYYYYYYY !!!");
-        const blobUrl = URL.createObjectURL(new Blob([extractedCode], { type: 'text/html' }));
-        console.log("Generated blob URL:", blobUrl);
-        return blobUrl;
+        console.log("Code is complete HTML");
+        return URL.createObjectURL(new Blob([extractedCode], { type: 'text/html' }));
       } else {
         // Wrap partial HTML content in a document structure
         return URL.createObjectURL(new Blob([`
@@ -542,7 +588,7 @@ const getPreviewContent = (code: string, language: string): string => {
                 return false;
               };
 
-              // Execute the extracted code
+              // Execute the code
               try {
                 ${extractedCode}
               } catch (err) {
@@ -628,6 +674,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
   const [previewUrls, setPreviewUrls] = useState<(string | null)[]>(Array(count).fill(null));
   const [explanations, setExplanations] = useState<string[]>(Array(count).fill(''));
   const [editorInstancesMap, setEditorInstancesMap] = useState<Map<string, any>>(new Map());
+  const [explanationEditorsMap, setExplanationEditorsMap] = useState<Map<number, any>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<'replace' | 'append'>('replace');
   const [explanationHeights, setExplanationHeights] = useState<EditorHeights>({});
@@ -854,6 +901,9 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         return;
       }
 
+      // Extract just the code portion using the helper function
+      const { code: extractedCode } = extractCodeAndExplanation(codeToImport, firstDropdownValue);
+
       await fetch('http://localhost:8000/save-imported-code', {
         method: 'POST',
         headers: {
@@ -864,17 +914,57 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
           prompt: prompt,
           language: firstDropdownValue,
           model: selectedModels[index],
-          code: codeToImport,
+          code: extractedCode,
           description: `Imported code from ${modelLabel}`
         }),
       });
 
-      console.log('Calling onCodeChange(0) with code:', codeToImport?.substring(0, 100) + '...');
-      onCodeChange(0)(codeToImport);
-      console.log('Import completed successfully');
+      console.log('Calling onCodeChange(0) with code:', extractedCode?.substring(0, 100) + '...');
+      onCodeChange(0)(extractedCode);
     } catch (error) {
       console.error('Error saving code history:', error);
     }
+  };
+
+  const handleExplanationEditorMount = (editor: any, index: number) => {
+    console.log(`Explanation editor mounted for index ${index}`);
+    console.log(`Current explanation value:`, explanations[index]);
+    
+    // Store editor instance
+    setExplanationEditorsMap(prev => {
+      const newMap = new Map(prev);
+      newMap.set(index, editor);
+      return newMap;
+    });
+
+    // Update editor options
+    editor.updateOptions({
+      readOnly: true,
+      minimap: { enabled: false },
+      fontSize: 14,
+      fontFamily: "Monaco, Menlo, 'Courier New', monospace",
+      fontLigatures: false,
+      wordWrap: 'on',
+      lineNumbers: 'off',
+      glyphMargin: false,
+      folding: false,
+      lineDecorationsWidth: 0,
+      lineNumbersMinChars: 0,
+      automaticLayout: true,
+      fontWeight: "400",
+      letterSpacing: 0
+    });
+
+    // Set initial value
+    if (explanations[index]) {
+      editor.setValue(explanations[index]);
+    }
+
+    // Force editor refresh
+    setTimeout(() => {
+      editor.layout();
+      editor.render(true);
+    }, 100);
   };
 
   const handlePromptSubmit = async () => {
@@ -921,16 +1011,19 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
         
         // Process results in the same order as selectedModels
         selectedModels.forEach((model, index) => {
-          if (!model) return; // Skip empty model slots
+          if (!model) {
+            console.log(`Skipping empty model at index ${index}`);
+            return;
+          }
           
           const result = resultsByModel.get(model);
           if (!result) {
-            errorOccurred = true;
             console.error(`No result found for model ${model}`);
-            setError(`No result found for model ${model}`);
             return;
           }
 
+          console.log(`Processing result for model ${model}:`, result);
+          
           if (result.error) {
             errorOccurred = true;
             console.error(`Error for ${result.model}:`, result.error);
@@ -941,26 +1034,37 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
               - Editor instance available: ${!!editorInstancesMap.get(model)}
               - Code length: ${result.code.length}`);
 
+            // Extract code and explanation
+            const { code: extractedCode, explanation } = extractCodeAndExplanation(result.code, firstDropdownValue);
+            
+            console.log(`Extracted code for ${result.model}:`, extractedCode);
+            console.log(`Extracted explanation for ${result.model}:`, explanation);
+
             // Update the code for the correct editor index (add 1 since index 0 is the main editor)
             onCodeChange(index + 1)(result.code);
             
-            // Update explanations for the correct index
-            const newExplanations = [...explanations];
-            newExplanations[index] = ''; // Clear any previous explanation
-            setExplanations(newExplanations);
+            // Log after the update
+            console.log(`Editor ${index + 1} should now display extracted code of length:`, extractedCode.length);
             
-            // Update the editor instance using the model name
-            const editorInstance = editorInstancesMap.get(model);
-            if (editorInstance) {
-              console.log(`Updating editor instance for ${model}`);
+            // Update explanations for the correct index
+            console.log(`Setting explanation for index ${index}:`, {
+              before: explanations[index],
+              after: explanation
+            });
+            const newExplanations = [...explanations];
+            newExplanations[index] = explanation || ''; // Ensure we don't set undefined
+            
+            // Update the explanation editor instance if it exists
+            const explanationEditor = explanationEditorsMap.get(index);
+            if (explanationEditor) {
+              console.log(`Updating explanation editor for index ${index}`);
               try {
-                editorInstance.setValue(result.code);
+                explanationEditor.setValue(explanation || '');
               } catch (editorError) {
-                console.error(`Error updating editor for ${model}:`, editorError);
+                console.error(`Error updating explanation editor for index ${index}:`, editorError);
               }
             } else {
-              console.warn(`No editor instance found for model: ${model}. Available instances:`, Array.from(editorInstancesMap.keys()));
-              // Editor might not be mounted yet, the code will be set through onCodeChange
+              console.warn(`No explanation editor instance found for index ${index}`);
             }
           }
         });
@@ -1075,6 +1179,41 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
     
     resizingRef.current = null;
   }, [handleResizeMove]);
+
+  // Add effect to log code changes
+  useEffect(() => {
+    codes.forEach((code, index) => {
+      console.log(`Current code content for editor ${index}:`, code);
+    });
+  }, [codes]);
+
+  useEffect(() => {
+    if (secondRadioValue !== 'none') {
+      const modelCount = parseInt(secondRadioValue);
+      console.log('Setting up models for count:', modelCount);
+      
+      // Set up default models based on comparison mode and language
+      const availableModels = firstDropdownValue === 'manim' ? manimModels : languageModels;
+      
+      // Initialize models array
+      const newModels = Array(modelCount).fill('').map((_, i) => availableModels[i]?.value || '');
+      setSelectedModels(newModels);
+      
+      // Initialize view modes
+      setViewModes(Array(modelCount).fill('code'));
+      
+      // Initialize explanations array
+      console.log('Initializing explanations array for', modelCount, 'editors');
+      setExplanations(Array(modelCount).fill(''));
+    }
+  }, [secondRadioValue, firstDropdownValue]);
+
+  // Add logging for explanations
+  useEffect(() => {
+    explanations.forEach((explanation, idx) => {
+      console.log(`Current explanation for editor ${idx}:`, explanation);
+    });
+  }, [explanations]);
 
   return (
     <Container>
@@ -1321,6 +1460,10 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                     )}
                     {viewModes[index] === 'code' ? (
                       <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                        {(() => {
+                          console.log(`Rendering code in editor ${index}:`, codes[index + 1]);
+                          return null;
+                        })()}
                         <Editor
                           key={`editor-${index}-${selectedModels[index]}`}
                           height="100%"
@@ -1391,18 +1534,27 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                     />
                     <Box sx={{ pt: '6px', display: 'flex', flexDirection: 'column', height: '100%' }}>
                       <SectionTitle>Explanation</SectionTitle>
-                      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                      <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+                        {/* Add debug display */}
+                        <Box sx={{ 
+                          position: 'absolute', 
+                          top: 0, 
+                          right: 0, 
+                          zIndex: 1, 
+                          bgcolor: 'rgba(0,0,0,0.7)', 
+                          p: 1, 
+                          fontSize: '12px' 
+                        }}>
+                          Length: {explanations[index]?.length || 0}
+                        </Box>
                         <Editor
                           height="100%"
                           defaultLanguage="markdown"
                           value={explanations[index] || ''}
-                          onChange={(value) => {
-                            const newExplanations = [...explanations];
-                            newExplanations[index] = value || '';
-                            setExplanations(newExplanations);
-                          }}
+                          onMount={(editor) => handleExplanationEditorMount(editor, index)}
                           theme="vs-dark"
                           options={{
+                            readOnly: true,
                             minimap: { enabled: false },
                             fontSize: 14,
                             fontFamily: "Monaco, Menlo, 'Courier New', monospace",
@@ -1415,7 +1567,7 @@ const ComparisonEditors: React.FC<ComparisonEditorsProps> = ({
                             lineNumbersMinChars: 0,
                             automaticLayout: true,
                             fontWeight: "400",
-                            letterSpacing: 0,
+                            letterSpacing: 0
                           }}
                         />
                       </Box>
